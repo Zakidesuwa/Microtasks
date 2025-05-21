@@ -35,6 +35,23 @@ declare global {
     // interface Error {} // Default SvelteKit error type
     // interface Platform {} // For Cloudflare Pages, Vercel, Netlify, etc.
 
+    // --- SvelteKit Environment Variables ---
+    // This is the crucial part you need to add/modify
+    interface SvelteKit {
+      EnvStaticPrivate: {
+        OPENROUTER_API_KEY: string;
+        FIREBASE_ADMIN_SDK_JSON: string;
+        CRON_SECRET: string;
+        RESEND_API_KEY: string;
+        APP_URL: string; // Assuming APP_URL is also a private env var used server-side
+        // Add any other private environment variables you have in .env
+      };
+      // If you had public vars (prefixed with PUBLIC_ in .env)
+      // EnvStaticPublic: {
+      //    PUBLIC_EXAMPLE_VAR: string;
+      // }
+    }
+
     // --- Shared custom types exported from the App namespace ---
     export type IconKey = "study" | "work" | "self-improvement" | "other"; // Defined icon keys
 
@@ -69,8 +86,6 @@ declare global {
     }
 
     // --- Form Action Return Types ---
-    // These define the structure of the object returned by form actions,
-    // especially when using `fail()` or successful returns.
     export interface BoardFormResult {
       success?: boolean;
       message?: string;

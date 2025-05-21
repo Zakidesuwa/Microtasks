@@ -237,12 +237,12 @@
 </script>
 
 <main
-    class="flex flex-col justify-center items-center min-h-screen w-full h-full bg-cover"
-    style="background-image: url('/background.png'); background-position: center +740px;" >
+    class="flex flex-col justify-center items-center min-h-screen w-full h-full bg-cover bg-fixed"
+    style="background-image: url('/background.png'); background-position: center +783px;" >
     <img
         src="/logonamin.png"
         alt="Microtask Logo"
-        class="absolute top-6 left-10 h-12 scale-150 md:scale-250" 
+        class="absolute top-10 left-10 h-12 scale-250" 
     />
     <h1 class="text-3xl font-bold text-center mb-6 text-black">Welcome to Microtask!</h1>
 
@@ -385,4 +385,3 @@
 		outline: none;
 	}
 </style>
-

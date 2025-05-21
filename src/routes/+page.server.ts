@@ -1,4 +1,3 @@
-// src/routes/login/+page.server.ts
 
 import type { Actions } from './$types.js';
 import { db } from '$lib/firebase.js'; // Ensure this path is correct
