@@ -1,0 +1,69 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Users collection (for fcmTokens and potentially other user-specific data)
+    match /users/{userId} {
+      // Allow a user to read and write to their own document or subcollections
+      // This is a common pattern for user-specific data.
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+
+      // fcmTokens subcollection: Stores FCM registration tokens for a user.
+      match /fcmTokens/{tokenId} {
+        // Allow an authenticated user to create, read, update, or delete their own FCM tokens.
+        // The `userId` in the path is matched against the authenticated user's UID.
+        allow read, write: if request.auth != null && request.auth.uid == userId;
+      }
+    }
+
+    // Counters collection: Used for generating user IDs during signup.
+    // Allow read/write only on the specific 'credentials' counter document.
+    // WARNING: This is open. Ideally handled server-side or via Cloud Function.
+    match /counters/credentials {
+      allow read, write: if true;
+    }
+
+    // Credentials collection: Stores user login info.
+    match /credentials/{userId} {
+      // Allow anyone to create (signup)
+      allow create: if true;
+
+      // Allow anyone to read any user document (for login, signup check, forgot pass check, home page load)
+      // WARNING: This allows reading all user documents, potentially exposing emails or other data.
+      // Necessary for the current flows to work without Firebase Auth integration in rules.
+      allow read: if true; // Includes 'get' and 'list'
+
+      // Allow anyone to update any user document (for the specific 'Return' username update case in home/+page.svelte)
+      // WARNING: Extremely insecure. Allows any user to update any other user's data.
+      // Required because the update logic runs client-side without auth context verifiable by rules.
+      allow update: if true;
+
+      // Notes subcollection: Stores notes specific to a user.
+      match /notes/{noteId} {
+        // Allow anyone to perform any operation on any user's notes.
+        // WARNING: Extremely insecure. Required because the load/actions in +page.server.js
+        // identify the user via a cookie, which rules cannot access for validation.
+        allow read, write: if true; // Includes list, get, create, update, delete
+      }
+    }
+// Notes collection: Stores notes, each linked to a user via a 'userId' field.
+    match /notes/{noteId} {
+      // Allow create if the user ID in the new document matches the authenticated user
+      allow create: if request.auth.uid == request.resource.data.userId;
+
+      // Allow read, update, delete if the authenticated user's ID matches the note's userId field
+      allow read, update, delete: if request.auth.uid == resource.data.userId;
+
+      // Allow list operations (like the query in +page.server.ts) only for the user's own notes
+      // Note: This requires a Firestore index on 'userId' for the 'notes' collection.
+      allow list: if request.auth.uid == request.query.resource.data.userId; // Check against query filter if possible, otherwise restrict broadly
+      // A simpler, more common approach for list if the above doesn't fit the query structure:
+      // allow list: if request.auth.uid != null; // Allow any authenticated user to list, relying on the 'where' clause in the code
+      // Let's use the simpler one for now as the query is already filtering by userId server-side.
+      // allow list: if request.auth.uid != null;
+      // UPDATE: Let's stick to the more secure read rule which covers 'get' and 'list' implicitly when combined with the query filter.
+    }
+    // Deny access to any other collections/paths by default.
+  }
+}
