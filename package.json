@@ -57,6 +57,7 @@
 	],
 	"dependencies": {
 		"@google-cloud/cloud-sql-connector": "^1.8.0",
+		"@lucia-auth/adapter-prisma": "^4.0.1",
 		"axios": "^1.8.4",
 		"bcryptjs": "^3.0.2",
 		"body-parser": "^2.2.0",
@@ -66,8 +67,10 @@
 		"firebase": "^11.6.0",
 		"firebase-admin": "^13.3.0",
 		"firebase-functions": "^6.3.2",
+		"lucia": "^3.2.2",
 		"lucide-svelte": "^0.509.0",
 		"nodemailer": "^7.0.3",
+		"oslo": "^1.2.1",
 		"resend": "^4.5.1"
 	},
 	"description": "Everything you need to build a Svelte library, powered by [`sv`](https://npmjs.com/package/sv).",
