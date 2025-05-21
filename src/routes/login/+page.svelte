@@ -1,7 +1,7 @@
 <script lang="ts">
     import { onMount } from 'svelte';
-    import { page } from '$app/stores';         // Correct for page store
-	import { goto } from '$app/navigation';
+    import { goto } from '$app/navigation';
+	import { page } from '$app/stores';
     import { auth } from '$lib/firebase';
     import {
         signInWithEmailAndPassword,
@@ -11,248 +11,145 @@
         sendPasswordResetEmail
     } from 'firebase/auth';
     import { browser } from '$app/environment';
-    import { enhance } from '$app/forms'; // Import enhance for form submissions
-    import type { ActionResult } from '@sveltejs/kit'; // For typing the form result
+    import { enhance } from '$app/forms';
+    import type { ActionResult } from '@sveltejs/kit';
 
-    // This variable will hold the result of the form action
     export let form: ActionResult | undefined | null;
-
 
     let email = '';
     let password = '';
     let isLoginMode = true;
-    let isLoading = false; // General loading state for the whole login/signup process
-    let isCreatingSession = false; // Specific loading state for session creation step
+    let isLoading = false;
     let errorMessage: string | null = null;
     let successMessage: string | null = null;
 
-    // This hidden form will be submitted programmatically
-    let sessionFormElement: HTMLFormElement;
+    let sessionCreateFormElement: HTMLFormElement;
 
-    async function createServerSessionViaFormAction(idToken: string) {
-        if (!sessionFormElement) {
-            console.error("[Login Page] Session form element not found!");
-            errorMessage = "Client error: Could not initiate session creation.";
-            return false;
-        }
-        if (!idToken || typeof idToken !== 'string' || idToken.trim() === "") {
-            console.error('[Login Page] createServerSessionViaFormAction called with invalid idToken:', idToken);
-            errorMessage = 'Authentication token is missing. Cannot complete login.';
-            return false;
-        }
-
-        console.log('[Login Page] Preparing to submit session form with idToken...');
-        isCreatingSession = true; // Indicate session creation is in progress
-        errorMessage = null; // Clear previous errors
-
-        const formData = new FormData();
-        formData.append('idToken', idToken);
-
-        // Programmatically submit the hidden form
-        // The `enhance` directive on the form will handle the submission
-        // We don't use fetch directly here; SvelteKit's form actions + enhance handle it.
-        // We need to create a submit event or directly call requestSubmit on the form.
-        // For simplicity with enhance, we can just trigger a submit on the form.
-        // Ensure the form has an input for idToken or append it.
-
-        // A more robust way with enhance might be to have visible inputs and let enhance handle it,
-        // but for programmatic submission like this:
-        const idTokenInput = sessionFormElement.elements.namedItem('idToken') as HTMLInputElement;
-        if (idTokenInput) {
-            idTokenInput.value = idToken;
-        } else {
-            // If no input, create one (though it's better to have it in the HTML)
-            const tempInput = document.createElement('input');
-            tempInput.type = 'hidden';
-            tempInput.name = 'idToken';
-            tempInput.value = idToken;
-            sessionFormElement.appendChild(tempInput);
-            sessionFormElement.requestSubmit();
-            sessionFormElement.removeChild(tempInput); // Clean up
-            return; // `enhance` will handle the rest, and we'll react to `form` prop changes
-        }
-        
-        sessionFormElement.requestSubmit(); // This will trigger the 'enhance' logic
-        // We don't return true/false directly here anymore.
-        // We will react to changes in the `form` prop.
+    interface SessionActionPayload {
+        success?: boolean;
+        message?: string;
+        error?: string;
+    }
+    interface CreateSessionActionResultData {
+        session?: SessionActionPayload;
+        error?: string;
     }
 
-    // Reactive statement to handle form action results
-    $: {
+    const handleSessionFormSubmit: Parameters<typeof enhance>[1] = () => {
+        console.log('[Enhance] Submitting session creation form (outer callback)...');
+        isLoading = true;
+        errorMessage = null;
+
+        return async ({ result, update }) => {
+            console.log('[Enhance update callback] Action result:', JSON.stringify(result, null, 2));
+            let resultData: CreateSessionActionResultData | undefined = undefined;
+
+            if (result.type === 'success' || result.type === 'failure') {
+                resultData = result.data as CreateSessionActionResultData | undefined;
+            }
+
+            if (result.type === 'success' && resultData?.session?.success === true) {
+                console.log('[Enhance update callback] Session creation successful. Message:', resultData.session.message);
+                successMessage = resultData.session.message ?? null;
+                await goto('/home');
+            } else if (result.type === 'failure') {
+                errorMessage = (resultData?.session?.error || resultData?.error) ?? 'Failed to establish server session.';
+                console.error('[Enhance update callback] Session creation failed (type: failure):', errorMessage);
+                await auth.signOut().catch(e => console.warn("[Enhance update callback] Client signout after session fail error:", e));
+            } else if (result.type === 'error') {
+                errorMessage = (result.error as Error)?.message || 'An unexpected error occurred.';
+                console.error('[Enhance update callback] Form submission error (type: error):', errorMessage);
+                await auth.signOut().catch(e => console.warn("[Enhance update callback] Client signout after form error:", e));
+            } else if (result.type === 'redirect') {
+                console.log('[Enhance update callback] Action resulted in a redirect to:', result.location);
+            } else if (result.type === 'success' && !(resultData?.session?.success === true)) {
+                errorMessage = resultData?.session?.error ?? 'Session creation reported an issue or returned unexpected data.';
+                console.error('[Enhance update callback] Session success type but internal failure/unexpected data:', errorMessage);
+                await auth.signOut().catch(e => console.warn("[Enhance update callback] Client signout after unexpected success data:", e));
+            }
+
+            await update({ reset: false });
+            isLoading = false;
+        };
+    };
+
+    $: { // Reactive block
         if (form) {
-            console.log("[Login Page] Form Action Result:", JSON.stringify(form, null, 2)); // Log the whole form object
-            isCreatingSession = false;
-            isLoading = false;
-
-            if (form.type === 'success') {
-                // For 'success', data is optional but your action returns it.
-                if (form.data?.session?.success) {
-                    console.log('[Login Page] Server session reported success:', form.data.session.message);
-                    // Redirection should ideally be handled by the login handlers after this block runs
-                    // For now, let's assume success means we can proceed.
-                    // If login handlers are waiting on `errorMessage` to be null:
-                    errorMessage = null; // Explicitly clear error on success
-                } else {
-                    // Success type, but not the expected data structure from your action
-                    const errorMsg = form.data?.session?.error || 'Session creation action succeeded but returned unexpected data.';
-                    console.error('[Login Page] Server session creation success but unexpected data:', errorMsg);
-                    errorMessage = errorMsg;
-                }
-            } else if (form.type === 'failure') {
-                // For 'failure', form.data will contain what was passed to fail()
-                const errorMsg = form.data?.session?.error || form.data?.error || 'Failed to establish server session.';
-                console.error('[Login Page] Server session creation failed (type: failure):', errorMsg);
-                errorMessage = errorMsg;
-            } else if (form.type === 'error') {
-                // For 'error', the error is in form.error
-                console.error('[Login Page] Form action resulted in an error:', form.error);
-                errorMessage = (form.error as Error)?.message || 'An unexpected error occurred during the operation.';
+            console.log("[Login Page] Form Prop Updated (reactive block), usually means enhance callback ran:", JSON.stringify(form, null, 2));
+            if (form.type === 'failure' && !errorMessage) {
+                const formErrorData = form.data as CreateSessionActionResultData | undefined;
+                errorMessage = (formErrorData?.session?.error || formErrorData?.error) ?? 'An error occurred (form prop).';
+                isLoading = false;
+            } else if (form.type === 'error' && !errorMessage) {
+                 errorMessage = (form.error as Error)?.message || 'An unexpected error occurred (form prop).';
+                 isLoading = false;
             }
-            // 'redirect' type is handled by SvelteKit automatically, no need for specific logic here usually unless you want to react to it.
-
-            form = null; // Reset form prop
+            form = null;
         }
     }
 
-
-    async function handleEmailLogin(event: Event) {
-        event.preventDefault();
+    async function processAuthentication(authPromise: Promise<any>, authSource: string) {
         isLoading = true;
-        isCreatingSession = false;
         errorMessage = null;
         successMessage = null;
-
         try {
-            const userCredential = await signInWithEmailAndPassword(auth, email, password);
-            const user = userCredential.user;
-            console.log("Email/Pass login successful, user UID:", user.uid);
-
+            const userCredentialOrResult = await authPromise;
+            const user = userCredentialOrResult.user;
+            console.log(`[Login Page] Client-side ${authSource} auth successful, user UID:`, user.uid);
             const idToken = await user.getIdToken();
-            console.log("[Login Page] ID Token obtained (Email/Pass):", idToken ? `Length: ${idToken.length}` : 'NULL');
-            
-            await createServerSessionViaFormAction(idToken);
-            // Now we wait for the `form` prop to update from the action result
-            // The redirection will happen IF the `form` prop indicates success
-            // and the original calling context (this function) can check a flag or be resolved.
-
-            // To handle redirection after form action success:
-            // We can't directly await the form prop update here.
-            // The goto('/home') needs to happen after `form` indicates success.
-            // This can be managed by a slight restructuring or by checking `form` in a loop (not ideal)
-            // or by setting a flag that the next reactive update of `form` should trigger goto.
-
-            // Simpler: let the reactive block handle error display, and if no error, assume success from here.
-            // The `form` prop will update, and if it's an error, `errorMessage` gets set.
-            // If it's success, this function will complete, then isLoading=false.
-            // The user experience is: click login -> isLoading=true -> form action runs -> isLoading=false.
-            // If errorMessage is still null after this, we can assume success and redirect.
-
-            // This timeout is a workaround to wait for the `form` prop to potentially update
-            // It's not ideal. A better way is to make `createServerSessionViaFormAction` return a Promise
-            // that resolves/rejects based on the `form` prop update.
-            await new Promise(resolve => setTimeout(resolve, 100)); // Small delay to allow `form` to update
-
-            if (!errorMessage) { // If createServerSessionViaFormAction didn't set an error from `form`
-                await goto('/home');
-            } else {
-                 await auth.signOut().catch(e => console.warn("Client signout after Email/Pass session fail:", e));
+            console.log(`[Login Page] ID Token obtained (${authSource}):`, idToken ? `Length: ${idToken.length}` : 'NULL_OR_UNDEFINED');
+            if (!idToken) {
+                throw new Error("Failed to obtain ID token from Firebase. Cannot create server session.");
             }
-
+            if (sessionCreateFormElement) {
+                (sessionCreateFormElement.elements.namedItem('idToken') as HTMLInputElement).value = idToken;
+                sessionCreateFormElement.requestSubmit();
+            } else {
+                console.error("[Login Page] Critical error: Session creation form element not found!");
+                errorMessage = "Client-side error: Login form is misconfigured.";
+                isLoading = false;
+            }
         } catch (error: any) {
-            console.error("Email/Pass login error:", error);
-            if (error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password' || error.code === 'auth/invalid-credential') {
+            console.error(`[Login Page] Error during ${authSource} or initial ID token fetch:`, error);
+            if (authSource === 'Google' && error.code === 'auth/popup-closed-by-user') {
+                errorMessage = "Google sign-in was cancelled by user.";
+            } else if (authSource === 'Email/Pass' && (error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password' || error.code === 'auth/invalid-credential')) {
                 errorMessage = 'Invalid email or password.';
+            } else if (authSource === 'Signup' && error.code === 'auth/email-already-in-use') {
+                errorMessage = 'This email is already registered. Please try logging in.';
             } else {
-                errorMessage = error.message || 'Login failed. Please try again.';
-            }
-            isLoading = false; // Ensure isLoading is false on direct catch
-        }
-        // isLoading is set to false by the reactive block or finally block if no direct catch.
-        // However, for clarity if an error happens before createServerSessionViaFormAction:
-        if (isLoading) isLoading = false;
-    }
-
-    async function handleGoogleLogin() {
-        isLoading = true;
-        isCreatingSession = false;
-        errorMessage = null;
-        successMessage = null;
-        try {
-            const provider = new GoogleAuthProvider();
-            const result = await signInWithPopup(auth, provider);
-            const user = result.user;
-            console.log("Google login successful, user UID:", user.uid);
-
-            const idToken = await user.getIdToken();
-            console.log("[Login Page] ID Token obtained (Google):", idToken ? `Length: ${idToken.length}` : 'NULL');
-            await createServerSessionViaFormAction(idToken);
-
-            await new Promise(resolve => setTimeout(resolve, 100));
-
-            if (!errorMessage) {
-                if (browser && user.displayName) {
-                    localStorage.setItem('microtask_username', user.displayName);
-                }
-                await goto('/home');
-            } else {
-                await auth.signOut().catch(e => console.warn("Client signout after Google session fail:", e));
-            }
-
-        } catch (error: any) {
-            console.error("Google login error:", error);
-            if (error.code === 'auth/popup-closed-by-user'){
-                errorMessage = "Google sign-in was cancelled.";
-            } else {
-                errorMessage = error.message || "Failed to log in with Google.";
+                errorMessage = error.message || `Failed to ${isLoginMode ? 'log in' : 'sign up'}.`;
             }
             isLoading = false;
         }
-        if (isLoading) isLoading = false;
     }
 
-    async function handleSignup(event: Event) {
+    function handleEmailLogin(event: Event) {
         event.preventDefault();
-        isLoading = true;
-        isCreatingSession = false;
-        errorMessage = null;
-        successMessage = null;
+        processAuthentication(signInWithEmailAndPassword(auth, email, password), 'Email/Pass');
+    }
 
+    function handleGoogleLogin() {
+        const googleProvider = new GoogleAuthProvider();
+        processAuthentication(
+            signInWithPopup(auth, googleProvider).then(result => {
+                if (browser && result.user.displayName) {
+                    localStorage.setItem('microtask_username', result.user.displayName);
+                }
+                return result;
+            }),
+            'Google'
+        );
+    }
+
+    function handleSignup(event: Event) {
+        event.preventDefault();
         if (password.length < 6) {
             errorMessage = "Password should be at least 6 characters.";
-            isLoading = false;
             return;
         }
-
-        try {
-            const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-            const user = userCredential.user;
-            console.log("Signup successful, user UID:", user.uid);
-
-            const idToken = await user.getIdToken();
-            console.log("[Login Page] ID Token obtained (Signup):", idToken ? `Length: ${idToken.length}` : 'NULL');
-            await createServerSessionViaFormAction(idToken);
-            
-            await new Promise(resolve => setTimeout(resolve, 100));
-
-            if (!errorMessage) {
-                successMessage = "Signup successful! Redirecting...";
-                await goto('/home');
-            } else {
-                await auth.signOut().catch(e => console.warn("Client signout after Signup session fail:", e));
-            }
-        } catch (error: any) {
-            console.error("Signup error:", error);
-            if (error.code === 'auth/email-already-in-use') {
-                errorMessage = 'This email is already registered. Try logging in.';
-            } else {
-                errorMessage = error.message || 'Signup failed. Please try again.';
-            }
-            isLoading = false;
-        }
-         if (isLoading) isLoading = false;
+        processAuthentication(createUserWithEmailAndPassword(auth, email, password), 'Signup');
     }
-
-    // handlePasswordReset remains the same as it doesn't involve session creation
 
     async function handlePasswordReset() {
         if (!email) {
@@ -279,27 +176,26 @@
         unsubscribeAuth = auth.onAuthStateChanged(async (user) => {
             if (user && $page.url.pathname === '/login' && !processingAuthChange) {
                 processingAuthChange = true;
-                isLoading = true;
-                console.log('[Login onMount] User client-side signed in. Attempting server session.');
+                console.log('[Login onMount] Client user detected. Attempting server session. UID:', user.uid);
                 try {
                     const idToken = await user.getIdToken(true);
-                    await createServerSessionViaFormAction(idToken);
-                    // Redirection will be handled based on the 'form' prop update
-                    // or if an error isn't set after a short delay.
-                    await new Promise(resolve => setTimeout(resolve, 100));
-                    if (!errorMessage && $page.url.pathname === '/login') { // Check error and still on login page
-                        goto('/home', { replaceState: true });
-                    } else if (errorMessage) {
-                        await auth.signOut().catch(e => console.warn("Client signout (onMount session fail):", e));
+                    console.log("[Login onMount] ID Token (onMount):", idToken ? `Length: ${idToken.length}` : 'NULL');
+                    if (!idToken) throw new Error("Failed to get ID token in onMount.");
+                    if (sessionCreateFormElement) {
+                        (sessionCreateFormElement.elements.namedItem('idToken') as HTMLInputElement).value = idToken;
+                        sessionCreateFormElement.requestSubmit();
+                    } else {
+                       throw new Error("Session form not found in onMount!");
                     }
-                } catch(error) {
+                } catch(error: any) {
                     console.error("[Login onMount] Error auto-session:", error);
-                    errorMessage = "Auto-login failed. Please login manually.";
+                    errorMessage = error.message || "Auto-login failed. Please login manually.";
                     await auth.signOut().catch(e => console.warn("Client signout (onMount error):", e));
-                } finally {
-                    isLoading = false; // Ensure isLoading is reset
+                    isLoading = false;
                     processingAuthChange = false;
                 }
+            } else if (!user) {
+                processingAuthChange = false;
             }
         });
         return () => {
@@ -308,12 +204,18 @@
     });
 </script>
 
-<!-- Hidden form for submitting idToken to the createSession action -->
-<form method="POST" action="?/createSession" use:enhance bind:this={sessionFormElement} style="display: none;">
+<!-- HTML TEMPLATE REMAINS THE SAME -->
+<form
+    method="POST"
+    action="?/createSession"
+    use:enhance={handleSessionFormSubmit}
+    bind:this={sessionCreateFormElement}
+    style="display: none;"
+    id="sessionCreateForm"
+>
     <input type="hidden" name="idToken" />
 </form>
 
-<!-- Your existing HTML template for the login form -->
 <div class="min-h-screen flex flex-col items-center justify-center bg-gray-50 dark:bg-zinc-900 px-4 sm:px-6 lg:px-8 font-sans">
     <div class="max-w-md w-full space-y-8 p-8 sm:p-10 bg-white dark:bg-zinc-800 shadow-xl rounded-xl">
         <div>
@@ -364,10 +266,10 @@
             {/if}
 
             <div>
-                <button type="submit" disabled={isLoading || isCreatingSession}
+                <button type="submit" disabled={isLoading}
                         class="group relative w-full flex justify-center py-3 px-4 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 dark:bg-blue-500 dark:hover:bg-blue-600 dark:focus:ring-offset-zinc-800 disabled:opacity-70">
                     <span class="absolute left-0 inset-y-0 flex items-center pl-3">
-                        {#if isLoading || isCreatingSession}
+                        {#if isLoading}
                             <svg class="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                                 <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
                                 <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
@@ -378,7 +280,7 @@
                             </svg>
                         {/if}
                     </span>
-                    {isLoading || isCreatingSession ? 'Processing...' : (isLoginMode ? 'Sign in' : 'Sign up')}
+                    {isLoading ? 'Processing...' : (isLoginMode ? 'Sign in' : 'Sign up')}
                 </button>
             </div>
         </form>
@@ -396,9 +298,9 @@
             </div>
 
             <div class="mt-6">
-                <button on:click={handleGoogleLogin} disabled={isLoading || isCreatingSession}
+                <button on:click={handleGoogleLogin} disabled={isLoading}
                         class="w-full inline-flex justify-center py-3 px-4 border border-gray-300 dark:border-zinc-600 rounded-md shadow-sm bg-white dark:bg-zinc-700 text-sm font-medium text-gray-700 dark:text-zinc-200 hover:bg-gray-50 dark:hover:bg-zinc-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 dark:focus:ring-offset-zinc-800 disabled:opacity-70">
-                     {#if isLoading || isCreatingSession}
+                     {#if isLoading && !successMessage}
                         <svg class="animate-spin -ml-1 mr-3 h-5 w-5 text-gray-700 dark:text-zinc-200" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                             <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
                             <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
@@ -413,7 +315,7 @@
         </div>
 
         <div class="mt-6 text-center text-sm">
-            <button on:click={() => { isLoginMode = !isLoginMode; errorMessage = null; successMessage = null; }}
+            <button on:click={() => { isLoginMode = !isLoginMode; errorMessage = null; successMessage = null; email = ''; password = ''; }}
                     class="font-medium text-blue-600 hover:text-blue-500 dark:text-blue-400 dark:hover:text-blue-300">
                 {isLoginMode ? "Don't have an account? Sign up" : "Already have an account? Sign in"}
             </button>
@@ -423,12 +325,11 @@
 
 <style>
  .font-sans { font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
- /* Dark mode specific alert/success styles (Tailwind 3.x+) */
- :global(body.dark .bg-red-100) { background-color: theme('colors.red.900'); } /* More direct if theme() works */
+ :global(body.dark .bg-red-100) { background-color: theme('colors.red.900'); }
  :global(body.dark .border-red-400) { border-color: theme('colors.red.700'); }
  :global(body.dark .text-red-700) { color: theme('colors.red.200'); }
 
  :global(body.dark .bg-green-100) { background-color: theme('colors.green.900'); }
  :global(body.dark .border-green-400) { border-color: theme('colors.green.700'); }
- :global(body.dark .text-green-700) { color: theme('colors.green.100'); } /* Brighter green text */
+ :global(body.dark .text-green-700) { color: theme('colors.green.100'); }
 </style>
