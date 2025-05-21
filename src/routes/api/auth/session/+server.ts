@@ -1,51 +1,68 @@
-// src/routes/api/auth/session-login/+server.ts
+// src/routes/api/auth/session/+server.ts
 import type { RequestHandler } from '@sveltejs/kit';
-import { json } from '@sveltejs/kit';
-import { adminAuth } from '$lib/server/firebaseAdmin';
+import { json, error } from '@sveltejs/kit';
+// Ensure this path matches where your firebaseAdmin setup is
+import { adminAuth } from '../../../../lib/server/firebaseAdmin.js'; // adminAuth is the initialized instance
+// Use dynamic private env vars for checking environment
+import { env } from '$env/dynamic/private';
 
 export const POST: RequestHandler = async ({ request, cookies }) => {
-    console.log('[API session-login] Received POST request.'); // DEBUG LOG
     try {
-        const requestBodyText = await request.text(); // Get raw text first
-        console.log('[API session-login] Raw request body text:', requestBodyText); // DEBUG LOG
+        // 1. Get the ID token from the client's request body
+        const { token } = await request.json();
 
-        let idToken: string | undefined;
-        try {
-            const requestBodyJSON = JSON.parse(requestBodyText);
-            console.log('[API session-login] Parsed request body JSON:', requestBodyJSON); // DEBUG LOG
-            idToken = requestBodyJSON.idToken;
-        } catch (parseError) {
-            console.error('[API session-login] Error parsing request body as JSON:', parseError);
-            return json({ error: 'Invalid request body: Malformed JSON.' }, { status: 400 });
+        if (!token) {
+            // Use SvelteKit's error helper for proper HTTP errors
+            throw error(400, 'ID token is required.');
         }
 
+        // 2. Verify the ID token using Firebase Admin SDK.
+        // This checks if the token is valid, not expired, and issued by your Firebase project.
 
-        if (!idToken || typeof idToken !== 'string' || idToken.trim() === '') {
-            console.warn('[API session-login] idToken is missing, undefined, or empty in parsed body.');
-            return json({ error: 'ID token required and must be a non-empty string.' }, { status: 400 });
-        }
+        // --- CORRECTED LINE ---
+        // Call verifyIdToken directly on the adminAuth instance
+        const decodedToken = await adminAuth.verifyIdToken(token, true /** checkRevoked - optional */);
+        // --- END CORRECTION ---
 
-        const expiresIn = 60 * 60 * 24 * 5 * 1000; // 5 days in milliseconds
-        console.log('[API session-login] Attempting to create session cookie with idToken (first 20 chars):', idToken.substring(0,20));
-        const sessionCookie = await adminAuth.createSessionCookie(idToken, { expiresIn });
-        console.log('[API session-login] Session cookie created successfully.');
+        console.log(`[API Session] Verified ID token for UID: ${decodedToken.uid}`);
 
-        cookies.set('__session', sessionCookie, {
-            maxAge: expiresIn / 1000,
-            httpOnly: true,
-            secure: process.env.NODE_ENV === 'production',
-            path: '/',
-            sameSite: 'lax',
+        // 3. Set the session cookie
+        const secure = env.NODE_ENV === 'production'; // Use secure cookies in production only
+        // Consider making maxAge configurable via env vars too
+        const maxAge = 60 * 60 * 24 * 14; // Cookie expiry: 14 days in seconds
+
+        cookies.set('__session', token, {
+            path: '/', // Cookie available for all paths
+            httpOnly: true, // CRITICAL: Prevents client-side JS from accessing the cookie
+            secure: secure, // CRITICAL: Send only over HTTPS in production
+            maxAge: maxAge, // How long the cookie lasts
+            sameSite: 'lax' // Protects against CSRF attacks in most cases
         });
-        console.log('[API session-login] __session cookie set.');
 
-        return json({ status: 'success', message: 'Session cookie created.' });
-    } catch (error: any) {
-        console.error('[API session-login] Error creating session cookie:', error.code, error.message, error); // Log more details
-        // Differentiate between client errors (bad token) and server errors
-        if (error.code && (error.code.startsWith('auth/') || error.code === 'messaging/invalid-argument')) { // Firebase Admin Auth errors
-            return json({ error: 'Failed to create session: Invalid authentication token provided.', details: error.message }, { status: 401 });
+        // 4. Return a success response to the client
+        return json({ success: true, message: 'Session cookie set.' });
+
+    } catch (err: any) {
+        console.error('[API Session] Error verifying token or setting cookie:', err);
+
+        // Handle specific Firebase Admin errors for better client feedback
+        if (err.code === 'auth/id-token-expired') {
+            throw error(401, 'Firebase ID token has expired. Please log in again.');
         }
-        return json({ error: 'Failed to create session due to an internal server error.', details: 'Please contact support if this persists.' }, { status: 500 });
+        if (err.code === 'auth/argument-error' || err.code === 'auth/invalid-id-token') {
+            throw error(401, 'Firebase ID token is invalid.');
+        }
+        // Handle revoked token if checkRevoked is true
+        if (err.code === 'auth/id-token-revoked') {
+             throw error(401, 'Your session has been revoked. Please log in again.');
+        }
+        // Default error for other issues
+        throw error(500, 'Failed to verify authentication.');
     }
 };
+
+// Optional: Add a GET or DELETE handler if you need to explicitly log out
+// export const DELETE: RequestHandler = async ({ cookies }) => {
+//  cookies.delete('__session', { path: '/' });
+//  return json({ success: true, message: 'Logged out' });
+// };

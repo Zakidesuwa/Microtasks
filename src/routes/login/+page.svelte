@@ -1,335 +1,387 @@
 <script lang="ts">
-    import { onMount } from 'svelte';
-    import { goto } from '$app/navigation';
+	import { onMount } from 'svelte';
+	import { goto } from '$app/navigation';
+	import { auth } from '$lib/firebase.js'; // Central Firebase instance
+	import {
+		signInWithEmailAndPassword,
+		signInWithPopup,
+		GoogleAuthProvider,
+		onAuthStateChanged
+	} from 'firebase/auth';
 	import { page } from '$app/stores';
-    import { auth } from '$lib/firebase';
-    import {
-        signInWithEmailAndPassword,
-        createUserWithEmailAndPassword,
-        GoogleAuthProvider,
-        signInWithPopup,
-        sendPasswordResetEmail
-    } from 'firebase/auth';
-    import { browser } from '$app/environment';
-    import { enhance } from '$app/forms';
-    import type { ActionResult } from '@sveltejs/kit';
+	import { fade } from 'svelte/transition';
 
-    export let form: ActionResult | undefined | null;
+	// --- Component State ---
+	let loginIdentifier = '';
+	let password = '';
+	let errorMessage: string | null = null;
+	let isLoading = false;
+	let showPassword = false;
+	let notificationMessage: string | null = null;
 
-    let email = '';
-    let password = '';
-    let isLoginMode = true;
-    let isLoading = false;
-    let errorMessage: string | null = null;
-    let successMessage: string | null = null;
+	// --- Lifecycle Hook ---
+	onMount(() => {
+		// Check for messages passed via URL parameters (e.g., after signup/password reset)
+		const urlParams = new URLSearchParams($page.url.search);
+		const message = urlParams.get('message');
+		const passwordResetSuccess = urlParams.get('passwordResetSuccess');
+		if (message === 'signup_success')
+			notificationMessage = 'Signup successful! You can now log in.';
+		else if (passwordResetSuccess === 'true')
+			notificationMessage = 'Password successfully updated! You can now log in.';
+		// Clean up URL parameters after reading them
+		if (message || passwordResetSuccess)
+			window.history.replaceState({}, document.title, $page.url.pathname);
+		// Check initial auth state (optional)
+		const unsubscribe = onAuthStateChanged(auth, (user) => {
+			if (user) console.log('[DEBUG] User already signed in.');
+			else console.log('[DEBUG] No user signed in.');
+		});
+		return () => unsubscribe(); // Cleanup listener on component destroy
+	});
 
-    let sessionCreateFormElement: HTMLFormElement;
+	// --- Session Creation Helper ---
+	// Sends the ID token to the server API endpoint to set the session cookie
+	async function createServerSession(idToken: string) {
+		console.log('[DEBUG] Sending ID token to /api/auth/session');
+		const response = await fetch('/api/auth/session', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ token: idToken })
+		});
 
-    interface SessionActionPayload {
-        success?: boolean;
-        message?: string;
-        error?: string;
-    }
-    interface CreateSessionActionResultData {
-        session?: SessionActionPayload;
-        error?: string;
-    }
+		if (!response.ok) {
+			let errorData;
+			try {
+				errorData = await response.json();
+			} catch (e) {
+				errorData = { message: `Server responded with status ${response.status}` };
+			}
+			console.error('[DEBUG] Failed to create server session:', errorData);
+			// Throw an error to be caught by the calling function
+			throw new Error(errorData.message || 'Failed to create server session.');
+		}
+		console.log('[DEBUG] Server session cookie set successfully.');
+		return true; // Indicate success
+	}
 
-    const handleSessionFormSubmit: Parameters<typeof enhance>[1] = () => {
-        console.log('[Enhance] Submitting session creation form (outer callback)...');
-        isLoading = true;
-        errorMessage = null;
+	// --- Firebase Login (Email/Password or Username) ---
+	// Handles the actual Firebase sign-in and subsequent session creation
+	async function performFirebaseLogin(emailToUse: string, passwordToUse: string) {
+		errorMessage = null;
+		isLoading = true; // Start loading indicator
 
-        return async ({ result, update }) => {
-            console.log('[Enhance update callback] Action result:', JSON.stringify(result, null, 2));
-            let resultData: CreateSessionActionResultData | undefined = undefined;
+		try {
+			// 1. Sign in with Firebase Auth
+			console.log(`[DEBUG] Attempting Firebase sign-in for email: ${emailToUse}`);
+			const userCredential = await signInWithEmailAndPassword(auth, emailToUse, passwordToUse);
+			const user = userCredential.user;
+			console.log('[DEBUG] Firebase login successful:', user.uid);
 
-            if (result.type === 'success' || result.type === 'failure') {
-                resultData = result.data as CreateSessionActionResultData | undefined;
-            }
+			// 2. Get ID Token
+			errorMessage = 'Finalizing login...'; // Update feedback
+			const idToken = await user.getIdToken();
 
-            if (result.type === 'success' && resultData?.session?.success === true) {
-                console.log('[Enhance update callback] Session creation successful. Message:', resultData.session.message);
-                successMessage = resultData.session.message ?? null;
-                await goto('/home');
-            } else if (result.type === 'failure') {
-                errorMessage = (resultData?.session?.error || resultData?.error) ?? 'Failed to establish server session.';
-                console.error('[Enhance update callback] Session creation failed (type: failure):', errorMessage);
-                await auth.signOut().catch(e => console.warn("[Enhance update callback] Client signout after session fail error:", e));
-            } else if (result.type === 'error') {
-                errorMessage = (result.error as Error)?.message || 'An unexpected error occurred.';
-                console.error('[Enhance update callback] Form submission error (type: error):', errorMessage);
-                await auth.signOut().catch(e => console.warn("[Enhance update callback] Client signout after form error:", e));
-            } else if (result.type === 'redirect') {
-                console.log('[Enhance update callback] Action resulted in a redirect to:', result.location);
-            } else if (result.type === 'success' && !(resultData?.session?.success === true)) {
-                errorMessage = resultData?.session?.error ?? 'Session creation reported an issue or returned unexpected data.';
-                console.error('[Enhance update callback] Session success type but internal failure/unexpected data:', errorMessage);
-                await auth.signOut().catch(e => console.warn("[Enhance update callback] Client signout after unexpected success data:", e));
-            }
+			// 3. Create Server Session Cookie
+			await createServerSession(idToken); // Call the helper function
 
-            await update({ reset: false });
-            isLoading = false;
-        };
-    };
+			// 4. Redirect on Full Success
+			goto(`/home?username=${encodeURIComponent(user.displayName || 'User')}`);
+			// isLoading will be implicitly false after navigation or if an error occurs
+		} catch (error: any) {
+			// Handle errors from Firebase Auth OR createServerSession
+			console.error('[DEBUG] Error during login or session creation:', error);
 
-    $: { // Reactive block
-        if (form) {
-            console.log("[Login Page] Form Prop Updated (reactive block), usually means enhance callback ran:", JSON.stringify(form, null, 2));
-            if (form.type === 'failure' && !errorMessage) {
-                const formErrorData = form.data as CreateSessionActionResultData | undefined;
-                errorMessage = (formErrorData?.session?.error || formErrorData?.error) ?? 'An error occurred (form prop).';
-                isLoading = false;
-            } else if (form.type === 'error' && !errorMessage) {
-                 errorMessage = (form.error as Error)?.message || 'An unexpected error occurred (form prop).';
-                 isLoading = false;
-            }
-            form = null;
-        }
-    }
+			// Firebase Auth errors
+			if (error.code === 'auth/invalid-email')
+				errorMessage = 'Invalid email format provided.';
+			else if (
+				error.code === 'auth/user-not-found' ||
+				error.code === 'auth/wrong-password' ||
+				error.code === 'auth/invalid-credential'
+			)
+				errorMessage = 'Incorrect email/username or password.';
+			else if (error.code === 'auth/user-disabled')
+				errorMessage = 'This account has been disabled.';
+			else if (error.code === 'auth/too-many-requests')
+				errorMessage = 'Access temporarily disabled due to many failed login attempts.';
+			// Error from createServerSession or other unexpected errors
+			else errorMessage = error.message || 'Login failed. Please try again.';
 
-    async function processAuthentication(authPromise: Promise<any>, authSource: string) {
-        isLoading = true;
-        errorMessage = null;
-        successMessage = null;
-        try {
-            const userCredentialOrResult = await authPromise;
-            const user = userCredentialOrResult.user;
-            console.log(`[Login Page] Client-side ${authSource} auth successful, user UID:`, user.uid);
-            const idToken = await user.getIdToken();
-            console.log(`[Login Page] ID Token obtained (${authSource}):`, idToken ? `Length: ${idToken.length}` : 'NULL_OR_UNDEFINED');
-            if (!idToken) {
-                throw new Error("Failed to obtain ID token from Firebase. Cannot create server session.");
-            }
-            if (sessionCreateFormElement) {
-                (sessionCreateFormElement.elements.namedItem('idToken') as HTMLInputElement).value = idToken;
-                sessionCreateFormElement.requestSubmit();
-            } else {
-                console.error("[Login Page] Critical error: Session creation form element not found!");
-                errorMessage = "Client-side error: Login form is misconfigured.";
-                isLoading = false;
-            }
-        } catch (error: any) {
-            console.error(`[Login Page] Error during ${authSource} or initial ID token fetch:`, error);
-            if (authSource === 'Google' && error.code === 'auth/popup-closed-by-user') {
-                errorMessage = "Google sign-in was cancelled by user.";
-            } else if (authSource === 'Email/Pass' && (error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password' || error.code === 'auth/invalid-credential')) {
-                errorMessage = 'Invalid email or password.';
-            } else if (authSource === 'Signup' && error.code === 'auth/email-already-in-use') {
-                errorMessage = 'This email is already registered. Please try logging in.';
-            } else {
-                errorMessage = error.message || `Failed to ${isLoginMode ? 'log in' : 'sign up'}.`;
-            }
-            isLoading = false;
-        }
-    }
+			isLoading = false; // Stop loading indicator on error
+		}
+	}
 
-    function handleEmailLogin(event: Event) {
-        event.preventDefault();
-        processAuthentication(signInWithEmailAndPassword(auth, email, password), 'Email/Pass');
-    }
+	// --- Main Login Handler (Form Submission) ---
+	// Determines if the input is email or username, calls lookup if needed, then calls performFirebaseLogin
+	async function handleLogin() {
+		errorMessage = null;
+		isLoading = true; // Start loading
+		const identifier = loginIdentifier.trim();
 
-    function handleGoogleLogin() {
-        const googleProvider = new GoogleAuthProvider();
-        processAuthentication(
-            signInWithPopup(auth, googleProvider).then(result => {
-                if (browser && result.user.displayName) {
-                    localStorage.setItem('microtask_username', result.user.displayName);
-                }
-                return result;
-            }),
-            'Google'
-        );
-    }
+		if (!identifier || !password) {
+			errorMessage = 'Please enter your email/username and password.';
+			isLoading = false;
+			return;
+		}
 
-    function handleSignup(event: Event) {
-        event.preventDefault();
-        if (password.length < 6) {
-            errorMessage = "Password should be at least 6 characters.";
-            return;
-        }
-        processAuthentication(createUserWithEmailAndPassword(auth, email, password), 'Signup');
-    }
+		const isEmail = identifier.includes('@');
 
-    async function handlePasswordReset() {
-        if (!email) {
-            errorMessage = "Please enter your email address to reset password.";
-            return;
-        }
-        isLoading = true;
-        errorMessage = null;
-        successMessage = null;
-        try {
-            await sendPasswordResetEmail(auth, email);
-            successMessage = "Password reset email sent! Check your inbox.";
-        } catch (error: any) {
-            console.error("Password reset error:", error);
-            errorMessage = error.message || "Failed to send password reset email.";
-        } finally {
-            isLoading = false;
-        }
-    }
+		if (isEmail) {
+			// Identifier looks like an email, attempt direct Firebase login
+			console.log(`[DEBUG] Identifier "${identifier}" treated as email. Proceeding with Firebase login.`);
+			await performFirebaseLogin(identifier, password);
+			// isLoading is handled within performFirebaseLogin
+		} else {
+			// Identifier looks like a username, call server action to find email
+			console.log(
+				`[DEBUG] Identifier "${identifier}" treated as username. Calling server action 'lookupEmail'...`
+			);
+			const formData = new FormData();
+			formData.append('username', identifier);
 
-    let unsubscribeAuth: (() => void) | null = null;
-    onMount(() => {
-        let processingAuthChange = false;
-        unsubscribeAuth = auth.onAuthStateChanged(async (user) => {
-            if (user && $page.url.pathname === '/login' && !processingAuthChange) {
-                processingAuthChange = true;
-                console.log('[Login onMount] Client user detected. Attempting server session. UID:', user.uid);
-                try {
-                    const idToken = await user.getIdToken(true);
-                    console.log("[Login onMount] ID Token (onMount):", idToken ? `Length: ${idToken.length}` : 'NULL');
-                    if (!idToken) throw new Error("Failed to get ID token in onMount.");
-                    if (sessionCreateFormElement) {
-                        (sessionCreateFormElement.elements.namedItem('idToken') as HTMLInputElement).value = idToken;
-                        sessionCreateFormElement.requestSubmit();
-                    } else {
-                       throw new Error("Session form not found in onMount!");
-                    }
-                } catch(error: any) {
-                    console.error("[Login onMount] Error auto-session:", error);
-                    errorMessage = error.message || "Auto-login failed. Please login manually.";
-                    await auth.signOut().catch(e => console.warn("Client signout (onMount error):", e));
-                    isLoading = false;
-                    processingAuthChange = false;
-                }
-            } else if (!user) {
-                processingAuthChange = false;
-            }
-        });
-        return () => {
-            if (unsubscribeAuth) unsubscribeAuth();
-        };
-    });
+			try {
+				const response = await fetch('?/lookupEmail', { method: 'POST', body: formData });
+				let result;
+				try {
+					result = await response.json(); // Expecting JSON response from action
+					console.log('[DEBUG] Server lookup response status:', response.status);
+					console.log('[DEBUG] Server lookup response JSON:', JSON.stringify(result, null, 2));
+				} catch (jsonError) {
+					// Handle cases where the response isn't valid JSON
+					console.error('[DEBUG] Failed to parse server lookup response as JSON:', jsonError);
+					const textResponse = await response.text();
+					console.log('[DEBUG] Server lookup response TEXT:', textResponse);
+					errorMessage = 'Received an invalid response from the server.';
+					isLoading = false;
+					return;
+				}
+
+				// Check the structure of the response from the SvelteKit action
+				if (!response.ok || result?.type === 'failure' || result?.lookup?.success === false) {
+					// Action failed (returned fail() or unexpected structure)
+					const errorMsg =
+						result?.lookup?.error || result?.error || 'Login failed. Please check username/password.';
+					console.log('[DEBUG] Server action indicated failure:', errorMsg);
+					errorMessage = errorMsg;
+					isLoading = false;
+				} else if (result?.lookup?.success && result?.lookup?.email) {
+					// Action succeeded and returned the email
+					const retrievedEmail = result.lookup.email;
+					console.log(
+						`[DEBUG] Server lookup successful. Email found: ${retrievedEmail}. Proceeding with Firebase login.`
+					);
+					// Now perform Firebase login using the retrieved email
+					await performFirebaseLogin(retrievedEmail, password);
+					// isLoading is handled within performFirebaseLogin
+				} else {
+					// Unexpected response structure
+					errorMessage = 'Received an unexpected response from the server.';
+					console.error('[DEBUG] Server lookup failed: Unexpected response structure.', result);
+					isLoading = false;
+				}
+			} catch (fetchError) {
+				// Network error during the fetch call to the action
+				console.error('[DEBUG] Network error during username lookup fetch:', fetchError);
+				errorMessage = 'Could not connect to the server. Please check your connection.';
+				isLoading = false;
+			}
+		}
+	}
+
+	// --- Google Login Handler ---
+	async function googleLogin() {
+		errorMessage = null;
+		isLoading = true; // Start loading
+
+		try {
+			// 1. Sign in with Google Popup
+			const provider = new GoogleAuthProvider();
+			const result = await signInWithPopup(auth, provider);
+			const user = result.user;
+			console.log('[DEBUG] Google login successful:', user.uid, user.displayName);
+
+			// 2. Get ID Token
+			errorMessage = 'Finalizing login...'; // Update feedback
+			const idToken = await user.getIdToken();
+
+			// 3. Create Server Session Cookie
+			await createServerSession(idToken); // Call the helper function
+
+			// 4. Redirect on Full Success
+			goto(`/home?username=${encodeURIComponent(user.displayName || 'User')}`);
+			// isLoading will be implicitly false after navigation or if an error occurs
+		} catch (error: any) {
+			// Handle errors from Google Popup OR createServerSession
+			console.error('[DEBUG] Google login or session creation error:', error);
+			if (error.code === 'auth/popup-closed-by-user')
+				errorMessage = 'Google sign-in was cancelled.';
+			else if (error.code === 'auth/account-exists-with-different-credential')
+				errorMessage =
+					'An account already exists with this email using a different sign-in method.';
+			else if (error.code === 'auth/popup-blocked')
+				errorMessage = 'Popup blocked by browser. Please allow popups for this site.';
+			// Error from createServerSession or other unexpected errors
+			else errorMessage = error.message || 'Google login failed. Please try again.';
+			isLoading = false; // Stop loading indicator on error
+		}
+	}
+
+	// --- UI Helpers ---
+	function togglePasswordVisibility() {
+		showPassword = !showPassword;
+	}
+	function clearNotification() {
+		notificationMessage = null;
+	}
 </script>
 
-<!-- HTML TEMPLATE REMAINS THE SAME -->
-<form
-    method="POST"
-    action="?/createSession"
-    use:enhance={handleSessionFormSubmit}
-    bind:this={sessionCreateFormElement}
-    style="display: none;"
-    id="sessionCreateForm"
->
-    <input type="hidden" name="idToken" />
-</form>
+<main
+    class="flex flex-col justify-center items-center min-h-screen w-full h-full bg-cover bg-fixed"
+    style="background-image: url('/background.png'); background-position: center +783px;" >
+    <img
+        src="/logonamin.png"
+        alt="Microtask Logo"
+        class="absolute top-10 left-10 h-12 scale-250" 
+    />
+    <h1 class="text-3xl font-bold text-center mb-6 text-black">Welcome to Microtask!</h1>
 
-<div class="min-h-screen flex flex-col items-center justify-center bg-gray-50 dark:bg-zinc-900 px-4 sm:px-6 lg:px-8 font-sans">
-    <div class="max-w-md w-full space-y-8 p-8 sm:p-10 bg-white dark:bg-zinc-800 shadow-xl rounded-xl">
-        <div>
-            <img class="mx-auto h-16 w-auto" src="/logonamin.png" alt="Microtask Logo">
-            <h2 class="mt-6 text-center text-3xl font-extrabold text-gray-900 dark:text-zinc-100">
-                {isLoginMode ? 'Sign in to your account' : 'Create a new account'}
-            </h2>
+    {#if notificationMessage}
+        <div
+            class="fixed top-4 right-4 max-w-sm bg-green-100 border border-green-400 text-green-700 px-4 py-3 rounded shadow-lg z-50 mb-4 flex justify-between items-center"
+            role="alert"
+            transition:fade
+        >
+            <span class="block sm:inline text-sm">{notificationMessage}</span>
+            <button on:click={clearNotification} class="ml-4 p-0.5 -mr-1" aria-label="Close notification">
+                <svg
+                    class="fill-current h-5 w-5 text-green-600 hover:text-green-800"
+                    role="button"
+                    xmlns="http://www.w3.org/2000/svg"
+                    viewBox="0 0 20 20"
+                    ><title>Close</title><path
+                        d="M14.348 14.849a1.2 1.2 0 0 1-1.697 0L10 11.819l-2.651 3.03a1.2 1.2 0 1 1-1.697-1.697l2.758-3.15-2.759-3.152a1.2 1.2 0 1 1 1.697-1.697L10 8.183l2.651-3.031a1.2 1.2 0 1 1 1.697 1.697l-2.758 3.152 2.758 3.15a1.2 1.2 0 0 1 0 1.698z"
+                    /></svg
+                >
+            </button>
         </div>
+    {/if}
+
+    <div class="bg-white p-6 md:p-8 rounded-lg shadow-2xl border border-gray-300 max-w-md w-[90%] md:w-full">
+        <h2 class="text-xl font-bold text-center mb-4">Log In</h2>
 
         {#if errorMessage}
-            <div class="bg-red-100 dark:bg-red-800 border border-red-400 dark:border-red-700 text-red-700 dark:text-red-200 px-4 py-3 rounded relative" role="alert">
-                <strong class="font-bold">Error: </strong>
+            <div
+                class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative mb-4 text-sm"
+                role="alert"
+                transition:fade
+            >
                 <span class="block sm:inline">{errorMessage}</span>
             </div>
         {/if}
-        {#if successMessage}
-            <div class="bg-green-100 dark:bg-green-700 border border-green-400 dark:border-green-600 text-green-700 dark:text-green-100 px-4 py-3 rounded relative" role="alert">
-                <strong class="font-bold">Success: </strong>
-                <span class="block sm:inline">{successMessage}</span>
-            </div>
-        {/if}
 
-        <form class="mt-8 space-y-6" on:submit|preventDefault={isLoginMode ? handleEmailLogin : handleSignup}>
-            <input type="hidden" name="remember" value="true">
-            <div class="rounded-md shadow-sm -space-y-px">
-                <div>
-                    <label for="email-address" class="sr-only">Email address</label>
-                    <input id="email-address" name="email" type="email" bind:value={email} autocomplete="email" required
-                           class="appearance-none rounded-none relative block w-full px-3 py-3 border border-gray-300 dark:border-zinc-600 placeholder-gray-500 dark:placeholder-zinc-400 text-gray-900 dark:text-zinc-100 bg-white dark:bg-zinc-700 rounded-t-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 focus:z-10 sm:text-sm"
-                           placeholder="Email address">
-                </div>
-                <div>
-                    <label for="password" class="sr-only">Password</label>
-                    <input id="password" name="password" type="password" bind:value={password} autocomplete={isLoginMode ? 'current-password' : 'new-password'} required
-                           class="appearance-none rounded-none relative block w-full px-3 py-3 border border-gray-300 dark:border-zinc-600 placeholder-gray-500 dark:placeholder-zinc-400 text-gray-900 dark:text-zinc-100 bg-white dark:bg-zinc-700 {isLoginMode ? 'rounded-b-md' : ''} focus:outline-none focus:ring-blue-500 focus:border-blue-500 focus:z-10 sm:text-sm"
-                           placeholder="Password">
-                </div>
+        <form on:submit|preventDefault={handleLogin} novalidate>
+            <div class="mb-4">
+                <label for="loginIdentifier" class="block text-gray-700 mb-1 font-medium text-sm"
+                    >Email or Username</label
+                >
+                <input
+                    id="loginIdentifier"
+                    name="loginIdentifier"
+                    type="text"
+                    bind:value={loginIdentifier}
+                    class="w-full px-3 py-2 border border-gray-300 rounded-lg outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 text-sm transition duration-150 ease-in-out"
+                    required
+                    placeholder="Enter your email or username"
+                    autocomplete="username"
+                    aria-required="true"
+                />
             </div>
-
-            {#if isLoginMode}
-            <div class="flex items-center justify-between">
-                <div class="text-sm">
-                    <button type="button" on:click={handlePasswordReset} class="font-medium text-blue-600 hover:text-blue-500 dark:text-blue-400 dark:hover:text-blue-300">
-                        Forgot your password?
+            <div class="mb-2">
+                <label for="password" class="block text-gray-700 mb-1 font-medium text-sm">Password</label>
+                <div class="relative">
+                    <input
+                        id="password"
+                        name="password"
+                        type={showPassword ? 'text' : 'password'}
+                        bind:value={password}
+                        class="w-full px-3 py-2 border border-gray-300 rounded-lg outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 text-sm transition duration-150 ease-in-out"
+                        required
+                        placeholder="Enter your password"
+                        autocomplete="current-password"
+                        aria-required="true"
+                    />
+                    <button
+                        type="button"
+                        aria-label={showPassword ? 'Hide password' : 'Show password'}
+                        class="absolute right-3 top-1/2 transform -translate-y-1/2 cursor-pointer text-gray-500 hover:text-gray-700 p-1"
+                        on:click={togglePasswordVisibility}
+                    >
+                        <svg
+                            xmlns="http://www.w3.org/2000/svg"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            stroke-width="1.5"
+                            stroke="currentColor"
+                            class="w-5 h-5"
+                        >
+                            {#if showPassword}
+                                <path
+                                    stroke-linecap="round"
+                                    stroke-linejoin="round"
+                                    d="M3.98 8.223A10.477 10.477 0 0 0 1.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.451 10.451 0 0 1 12 4.5c4.756 0 8.773 3.162 10.065 7.498a10.522 10.522 0 0 1-4.293 5.774M6.228 6.228 3 3m3.228 3.228 3.65 3.65m7.894 7.894L21 21m-3.228-3.228-3.65-3.65m0 0a3 3 0 1 0-4.243-4.243m4.242 4.242L9.88 9.88"
+                                />
+                            {:else}
+                                <path
+                                    stroke-linecap="round"
+                                    stroke-linejoin="round"
+                                    d="M2.036 12.322a1.012 1.012 0 0 1 0-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178Z"
+                                />
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
+                            {/if}
+                        </svg>
                     </button>
                 </div>
             </div>
-            {/if}
-
-            <div>
-                <button type="submit" disabled={isLoading}
-                        class="group relative w-full flex justify-center py-3 px-4 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 dark:bg-blue-500 dark:hover:bg-blue-600 dark:focus:ring-offset-zinc-800 disabled:opacity-70">
-                    <span class="absolute left-0 inset-y-0 flex items-center pl-3">
-                        {#if isLoading}
-                            <svg class="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                            </svg>
-                        {:else}
-                            <svg class="h-5 w-5 text-blue-400 dark:text-blue-300 group-hover:text-blue-300 dark:group-hover:text-blue-200" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-                                <path fill-rule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clip-rule="evenodd" />
-                            </svg>
-                        {/if}
-                    </span>
-                    {isLoading ? 'Processing...' : (isLoginMode ? 'Sign in' : 'Sign up')}
-                </button>
+            <div class="flex justify-end items-center mt-3 mb-4">
+                <a href="/forgotpass" class="text-sm text-blue-600 hover:underline font-medium"
+                    >Forgot Password?</a
+                >
             </div>
-        </form>
-
-         <div class="mt-6">
-            <div class="relative">
-                <div class="absolute inset-0 flex items-center">
-                    <div class="w-full border-t border-gray-300 dark:border-zinc-600"></div>
+            <button
+                type="submit"
+                disabled={isLoading}
+                class="w-full bg-black text-white py-2.5 rounded-lg font-semibold transition duration-200 ease-in-out transform hover:scale-[1.02] focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-black disabled:opacity-60 disabled:cursor-not-allowed"
+            >
+                {isLoading ? 'Logging in...' : 'Log in'}
+            </button>
+            <div class="mt-4 text-center text-sm">
+                Don't have an account?
+                <a href="/signup" class="text-blue-600 hover:underline font-medium">Create one</a>
+            </div>
+            <div class="relative my-5">
+                <div class="absolute inset-0 flex items-center" aria-hidden="true">
+                    <div class="w-full border-t border-gray-300"></div>
                 </div>
                 <div class="relative flex justify-center text-sm">
-                    <span class="px-2 bg-white dark:bg-zinc-800 text-gray-500 dark:text-zinc-400">
-                        Or continue with
-                    </span>
+                    <span class="px-2 bg-white text-gray-500">Or</span>
                 </div>
             </div>
-
-            <div class="mt-6">
-                <button on:click={handleGoogleLogin} disabled={isLoading}
-                        class="w-full inline-flex justify-center py-3 px-4 border border-gray-300 dark:border-zinc-600 rounded-md shadow-sm bg-white dark:bg-zinc-700 text-sm font-medium text-gray-700 dark:text-zinc-200 hover:bg-gray-50 dark:hover:bg-zinc-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 dark:focus:ring-offset-zinc-800 disabled:opacity-70">
-                     {#if isLoading && !successMessage}
-                        <svg class="animate-spin -ml-1 mr-3 h-5 w-5 text-gray-700 dark:text-zinc-200" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                        </svg>
-                        Processing...
-                     {:else}
-                        <svg class="w-5 h-5 mr-2 -ml-1" aria-hidden="true" focusable="false" data-prefix="fab" data-icon="google" role="img" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 488 512"><path fill="currentColor" d="M488 261.8C488 403.3 381.5 512 244 512 110.3 512 0 398.8 0 256S110.3 0 244 0c77.3 0 143.3 30.3 191.3 78.3l-75.8 66.3C334.3 119.9 291.8 99.3 244 99.3c-71.3 0-130 57.8-130 129.3s58.7 129.3 130 129.3c50.3 0 87-20.2 109.3-40.7 22.3-20.5 36.8-51.8 41.8-88.7H244V261.8z"></path></svg>
-                        Sign in with Google
-                     {/if}
-                </button>
-            </div>
-        </div>
-
-        <div class="mt-6 text-center text-sm">
-            <button on:click={() => { isLoginMode = !isLoginMode; errorMessage = null; successMessage = null; email = ''; password = ''; }}
-                    class="font-medium text-blue-600 hover:text-blue-500 dark:text-blue-400 dark:hover:text-blue-300">
-                {isLoginMode ? "Don't have an account? Sign up" : "Already have an account? Sign in"}
+            <button
+                type="button"
+                on:click={googleLogin}
+                disabled={isLoading}
+                class="w-full border border-gray-300 flex items-center justify-center py-2.5 rounded-lg font-semibold cursor-pointer transition duration-200 ease-in-out transform hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-gray-400 disabled:opacity-60 disabled:cursor-not-allowed"
+            >
+                <img src="/iconnggoogle.webp" alt="Google" class="h-5 mr-2" />
+                <span class="text-sm text-gray-700">Log in with Google</span>
             </button>
-        </div>
+        </form>
     </div>
-</div>
+</main>
 
 <style>
- .font-sans { font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
- :global(body.dark .bg-red-100) { background-color: theme('colors.red.900'); }
- :global(body.dark .border-red-400) { border-color: theme('colors.red.700'); }
- :global(body.dark .text-red-700) { color: theme('colors.red.200'); }
-
- :global(body.dark .bg-green-100) { background-color: theme('colors.green.900'); }
- :global(body.dark .border-green-400) { border-color: theme('colors.green.700'); }
- :global(body.dark .text-green-700) { color: theme('colors.green.100'); }
+	input:focus {
+		outline: none;
+	}
 </style>
