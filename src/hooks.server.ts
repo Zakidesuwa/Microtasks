@@ -19,7 +19,7 @@ export const handle: Handle = async ({ event, resolve }) => {
 
         // --- CORRECTED LINE ---
         // Call verifyIdToken directly on the adminAuth instance
-        const decodedToken = await adminAuth.verifyIdToken(sessionCookie);
+        const decodedToken = await adminAuth.verifyIdToken(sessionCookie, true);
         // --- END CORRECTION ---
 
         // console.debug(`[Hooks] Session cookie verified for UID: ${decodedToken.uid}`);

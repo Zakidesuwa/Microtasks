@@ -1,6 +1,8 @@
 // src/routes/api/auth/session/+server.ts
 import type { RequestHandler } from '@sveltejs/kit';
 import { json, error } from '@sveltejs/kit';
+import { adminDb } from '../../../../lib/server/firebaseAdmin.js';
+import { FieldValue } from 'firebase-admin/firestore';
 // Ensure this path matches where your firebaseAdmin setup is
 import { adminAuth } from '../../../../lib/server/firebaseAdmin.js'; // adminAuth is the initialized instance
 // Use dynamic private env vars for checking environment
@@ -38,9 +40,32 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
             maxAge: maxAge, // How long the cookie lasts
             sameSite: 'lax' // Protects against CSRF attacks in most cases
         });
+// 4. Create or update user document in 'credentials' collection
+const userDocRef = adminDb.collection('credentials').doc(decodedToken.uid);
+const userDoc = await userDocRef.get();
 
-        // 4. Return a success response to the client
-        return json({ success: true, message: 'Session cookie set.' });
+if (!userDoc.exists) {
+    // User document doesn't exist, create it
+    await userDocRef.set({
+        username: decodedToken.name || decodedToken.email || 'Google User',
+        email: decodedToken.email,
+        provider: 'google',
+        createdAt: FieldValue.serverTimestamp()
+    });
+    console.log(`[API Session] Created new user document for UID: ${decodedToken.uid}`);
+} else {
+    // User document exists, update it with latest info (e.g., display name)
+    await userDocRef.update({
+        username: decodedToken.name || decodedToken.email || 'Google User',
+        email: decodedToken.email,
+        lastLogin: FieldValue.serverTimestamp()
+    });
+    console.log(`[API Session] Updated user document for UID: ${decodedToken.uid}`);
+}
+
+// 5. Return a success response to the client
+return json({ success: true, message: 'Session cookie set.' });
+
 
     } catch (err: any) {
         console.error('[API Session] Error verifying token or setting cookie:', err);
