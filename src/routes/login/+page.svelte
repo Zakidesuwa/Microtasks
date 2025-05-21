@@ -28,7 +28,7 @@
 
         try {
             console.log('[Login Page] Attempting to create server session with ID token...');
-            const response = await fetch('/api/auth/session-login', { // CORRECTED URL
+            const response = await fetch('/api/auth/session-login', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
