@@ -1,93 +1,106 @@
-
-import type { Actions } from './$types.js';
-import { db } from '$lib/firebase.js'; // Ensure this path is correct
-import { fail } from '@sveltejs/kit';
+// src/routes/login/+page.server.ts
+import { json, error as SvelteKitError, fail } from '@sveltejs/kit';
+import type { Actions, PageServerLoad } from './$types.js'; // Added PageServerLoad if you have one
+import { adminAuth } from '$lib/server/firebaseAdmin.js';
 import { collection, query, where, getDocs, limit } from 'firebase/firestore';
+import { db } from '$lib/firebase'; // Client-side db for lookupEmail (consider using adminDb here too for consistency)
 
-// --- Action to look up email by username ---
+// Optional: Load function (if you need to pass any data to the login page on initial load)
+// export const load: PageServerLoad = async ({ locals }) => {
+//     if (locals.userId) {
+//         // If user already has a valid session, maybe redirect them from login page
+//         // throw redirect(303, '/home');
+//     }
+//     return {};
+// };
+
 export const actions: Actions = {
+  // Your existing lookupEmail action
   lookupEmail: async ({ request }) => {
+    // ... (your existing lookupEmail logic) ...
     const formData = await request.formData();
     const username = formData.get('username')?.toString();
 
-    // Validate input: Check if username was provided
     if (!username) {
-      // Return 400 Bad Request if username is missing
-      return fail(400, {
-          lookup: { // Use consistent nested structure for errors
-            success: false,
-            error: 'Username was not provided.'
-          }
-      });
+      return fail(400, { lookup: { success: false, error: 'Username was not provided.'}});
     }
-
-    console.log(`[DEBUG] Server: Looking up email for username: ${username}`);
-
+    console.log(`[Login Action lookupEmail] Looking up email for username: ${username}`);
     try {
-      // Prepare Firestore query
-      const credRef = collection(db, "credentials");
-      const q = query(credRef, where("username", "==", username), limit(1)); // Query by username, expect max 1 result
-
-      // Execute query
+      const credRef = collection(db, "credentials"); // Using client-side db here, consider adminDb
+      const q = query(credRef, where("username", "==", username), limit(1));
       const snapshot = await getDocs(q);
-
-      // --- Handling Firestore Query Result ---
       if (snapshot.empty) {
-        // Username not found in the database
-        console.log(`[DEBUG] Server: Username not found: ${username}. Returning fail(404).`);
-        // Use fail(404) to indicate resource not found, providing a clear error message
-        return fail(404, { // HTTP 404 Not Found
-            lookup: { // Maintain consistent payload structure
-                success: false,
-                error: 'Username not found.' // Specific error for client
-            }
-        });
+        return fail(404, { lookup: { success: false, error: 'Username not found.' }});
       } else {
-        // Username found, proceed to extract email
         const userData = snapshot.docs[0].data();
         const email = userData.email;
-
-        // Validate data integrity: Check if email field exists
         if (!email) {
-             console.error(`[DEBUG] Server: Found user document for ${username} but the 'email' field is missing or empty.`);
-             // Return 500 Internal Server Error for incomplete data
-             return fail(500, {
-                 lookup: {
-                    success: false,
-                    error: 'User data incomplete on server.' // Error for internal issue
-                 }
-             });
+             return fail(500, { lookup: { success: false, error: 'User data incomplete on server (email missing).' }});
         }
-
-        // Successfully found the email associated with the username
-        console.log(`[DEBUG] Server: Found email ${email} for username ${username}`);
-        // Return a successful response (plain object, SvelteKit sends HTTP 200)
-        return { // Success case
-            lookup: {
-                success: true,
-                email: email // Include the found email
-            }
-        };
+        return { lookup: { success: true, email: email }};
       }
     } catch (error: any) {
-      // Catch any unexpected errors during Firestore interaction or processing
-      console.error("[DEBUG] Server: Unexpected error during username lookup:", error);
-      // Return 500 Internal Server Error for unexpected issues
-      return fail(500, {
-          lookup: {
+      console.error("[Login Action lookupEmail] Error:", error);
+      return fail(500, { lookup: { success: false, error: 'Internal server error during email lookup.' }});
+    }
+  },
+
+  // New action to create a session cookie
+  createSession: async ({ request, cookies }) => {
+    console.log('[Login Action createSession] Received request.');
+    try {
+      const formData = await request.formData();
+      const idToken = formData.get('idToken')?.toString();
+
+      if (!idToken || typeof idToken !== 'string' || idToken.trim() === '') {
+        console.warn('[Login Action createSession] ID token missing or invalid from form data.');
+        return fail(400, { // Use fail for form action errors
+            session: { // Keep errors nested for clarity on the client
+                success: false,
+                error: 'Authentication token is required.'
+            }
+        });
+      }
+
+      const expiresIn = 60 * 60 * 24 * 5 * 1000; // 5 days
+      console.log('[Login Action createSession] Attempting to create session cookie with idToken (first 20 chars):', idToken.substring(0,20));
+      const sessionCookie = await adminAuth.createSessionCookie(idToken, { expiresIn });
+      console.log('[Login Action createSession] Session cookie created successfully.');
+
+      cookies.set('__session', sessionCookie, {
+        maxAge: expiresIn / 1000,
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        path: '/',
+        sameSite: 'lax',
+      });
+      console.log('[Login Action createSession] __session cookie set.');
+
+      // For form actions, a successful plain object return implies success.
+      // SvelteKit's `enhance` will see this and typically the `result.type` will be 'success'.
+      return {
+        session: {
+            success: true,
+            message: 'Session created successfully.'
+        }
+      };
+
+    } catch (error: any) {
+      console.error('[Login Action createSession] Error:', error.code, error.message, error);
+      let errorMessage = 'Failed to create session due to an internal server error.';
+      let errorStatus = 500;
+
+      if (error.code && (error.code.startsWith('auth/') || error.code === 'messaging/invalid-argument')) {
+        errorMessage = `Failed to create session: ${error.message || 'Invalid authentication token.'}`;
+        errorStatus = 401; // Unauthorized or Bad Request depending on context
+      }
+      
+      return fail(errorStatus, {
+        session: {
             success: false,
-            error: 'An internal server error occurred. Please try again later.' // Generic error for client
-          }
+            error: errorMessage
+        }
       });
     }
   }
-  // Other actions (e.g., password reset) could be defined here
 };
-
-// Optional: Load function (uncomment and adapt if needed for passing initial data/messages)
-// export async function load({ url }) {
-//     // ... load function logic ...
-//     return {
-//         // props for the page
-//     };
-// }
