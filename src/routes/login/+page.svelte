@@ -1,6 +1,7 @@
 <script lang="ts">
     import { onMount } from 'svelte';
-    import { goto, page } from '$app/stores';
+    import { page } from '$app/stores';         // Correct for page store
+	import { goto } from '$app/navigation';
     import { auth } from '$lib/firebase';
     import {
         signInWithEmailAndPassword,
@@ -78,22 +79,38 @@
 
     // Reactive statement to handle form action results
     $: {
-        if (form) { // `form` is the prop SvelteKit provides with action results
-            console.log("[Login Page] Form Action Result:", form);
-            isCreatingSession = false; // Session creation attempt finished
-            isLoading = false; // Also general loading
+        if (form) {
+            console.log("[Login Page] Form Action Result:", JSON.stringify(form, null, 2)); // Log the whole form object
+            isCreatingSession = false;
+            isLoading = false;
 
-            if (form.type === 'success' && form.data?.session?.success) {
-                console.log('[Login Page] Server session reported success:', form.data.session.message);
-                // If successful, the login handlers will proceed with goto('/home')
-                // We might not need to do anything else here if the calling function handles redirection
-            } else if (form.type === 'failure' || (form.data && !form.data.session?.success)) {
+            if (form.type === 'success') {
+                // For 'success', data is optional but your action returns it.
+                if (form.data?.session?.success) {
+                    console.log('[Login Page] Server session reported success:', form.data.session.message);
+                    // Redirection should ideally be handled by the login handlers after this block runs
+                    // For now, let's assume success means we can proceed.
+                    // If login handlers are waiting on `errorMessage` to be null:
+                    errorMessage = null; // Explicitly clear error on success
+                } else {
+                    // Success type, but not the expected data structure from your action
+                    const errorMsg = form.data?.session?.error || 'Session creation action succeeded but returned unexpected data.';
+                    console.error('[Login Page] Server session creation success but unexpected data:', errorMsg);
+                    errorMessage = errorMsg;
+                }
+            } else if (form.type === 'failure') {
+                // For 'failure', form.data will contain what was passed to fail()
                 const errorMsg = form.data?.session?.error || form.data?.error || 'Failed to establish server session.';
-                console.error('[Login Page] Server session creation failed via form action:', errorMsg);
+                console.error('[Login Page] Server session creation failed (type: failure):', errorMsg);
                 errorMessage = errorMsg;
-                // The login handlers should call auth.signOut() if session creation fails
+            } else if (form.type === 'error') {
+                // For 'error', the error is in form.error
+                console.error('[Login Page] Form action resulted in an error:', form.error);
+                errorMessage = (form.error as Error)?.message || 'An unexpected error occurred during the operation.';
             }
-            form = null; // Reset form prop to allow reacting to next submission
+            // 'redirect' type is handled by SvelteKit automatically, no need for specific logic here usually unless you want to react to it.
+
+            form = null; // Reset form prop
         }
     }
 
