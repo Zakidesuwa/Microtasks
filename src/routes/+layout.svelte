@@ -1,7 +1,7 @@
 <script lang="ts">
  	import '../app.css';
  	import { onMount } from 'svelte';
-	import FcmManager from '$lib/components/FcmManager.svelte'; // Import FcmManager
+	import FcmManager from '$lib/components/FcmManager.svelte'; 
   
  	let { children } = $props();
 
@@ -16,6 +16,6 @@
  	});
 </script>
 
-<FcmManager /> <!-- Add FcmManager component here -->
+<FcmManager /> 
  
 {@render children()}
