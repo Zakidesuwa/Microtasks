@@ -1,6 +1,6 @@
 <script lang="ts">
-  import { onMount, tick, onDestroy } from 'svelte'; // Added onDestroy
-  import { page } from '$app/stores'; // For $page.url.pathname
+  import { onMount, tick, onDestroy } from 'svelte';
+  import { page } from '$app/stores';
   import { enhance } from '$app/forms';
   import { slide, scale, fly, fade } from 'svelte/transition';
   import { quintOut } from 'svelte/easing';
@@ -22,25 +22,24 @@
     color?: string;
   }
 
-  // Props from server load function
   export let data: {
     user?: { name?: string };
     tasks: TaskForFrontend[];
     error?: string;
   };
-  export let form: ActionResult | undefined | null; // For form action results from this page
+  export let form: ActionResult | undefined | null;
 
   let isSidebarOpen = false;
   let username = "User (Calendar Initial Default)";
-  console.log('[Calendar Svelte] Initial `username` state:', username);
+  // console.log('[Calendar Svelte] Initial `username` state:', username); // Keep for debugging if needed
 
-  let greeting = "GOOD DAY"; // Will be set by getGreeting
+  let greeting = "GOOD DAY";
   let eventFormActionError: string | null = null;
   let pageError: string | null = data.error || null;
   let isDarkMode = false;
 
   let currentYear = new Date().getFullYear();
-  let currentMonth = new Date().getMonth(); // 0-indexed
+  let currentMonth = new Date().getMonth();
 
   interface CalendarEvent { id: string; title: string; description?: string; color?: string; deadlineTime?: string; }
   interface Day { dayNum: number; events: CalendarEvent[]; isCurrentMonth: boolean; isToday: boolean; date: Date; }
@@ -48,7 +47,7 @@
   let isLoadingCalendar = true;
 
   let showEventForm = false;
-  let editingEventId: string | null = null; // Not used in current addEvent, but for future edit
+  let editingEventId: string | null = null;
   let eventTitle = "";
   let eventDescription = "";
   let eventDate: string | null = null;
@@ -60,31 +59,23 @@
 
   const dropdownIds = ['notifWindow', 'helpWindow', 'profileWindow'];
 
-  // --- DEFINE getGreeting FUNCTION ---
   function getGreeting() {
     const hour = new Date().getHours();
     if (hour >= 5 && hour < 12) return "GOOD MORNING";
     if (hour >= 12 && hour < 18) return "GOOD AFTERNOON";
     return "GOOD EVENING";
   }
-  // --- END DEFINE getGreeting ---
-
-  // --- REACTIVE VARIABLE FOR CURRENT PATH (for sidebar active link) ---
   $: currentPath = $page.url.pathname;
-  // --- END REACTIVE VARIABLE ---
 
-
-  // --- Username Helper Functions ---
   function getStoredUsername(): string {
     if (browser) {
       const storedName = localStorage.getItem('microtask_username') || "User (from Calendar Storage Default)";
-      console.log('[Calendar Svelte getStoredUsername] Value from localStorage:', storedName);
+      // console.log('[Calendar Svelte getStoredUsername] Value from localStorage:', storedName);
       return storedName;
     }
     return "User (Calendar SSR Default)";
   }
 
-  // --- Calendar Logic (updateCalendarDays, prevMonth, nextMonth) ---
   async function updateCalendarDays() {
     isLoadingCalendar = true;
     await tick();
@@ -105,6 +96,7 @@
         const currentDateObj = new Date(currentYear, currentMonth, i); currentDateObj.setHours(0,0,0,0);
         const isTodayFlag = currentDateObj.getTime() === today.getTime();
         let eventsForThisDay: CalendarEvent[] = [];
+
         if (data.tasks && Array.isArray(data.tasks)) {
             data.tasks.forEach(task => {
                 if (task.dueDateISO) {
@@ -115,11 +107,10 @@
                 }
             });
         }
-        if (isTodayFlag && today.getDay() === 4) { // Thursday specials
-            const thursdaySpecialEvents: CalendarEvent[] = [ { id: 'today_thu_evt1', title: 'Project Deadline Meeting', deadlineTime: '11:30', color: '#EF4444' }, { id: 'today_thu_evt2', title: 'System Security Update', deadlineTime: '16:00', color: '#F59E0B' }, ];
-            const existingTitles = new Set(eventsForThisDay.map(e => e.title));
-            thursdaySpecialEvents.forEach(tse => { if (!existingTitles.has(tse.title)) eventsForThisDay.push(tse); });
-        }
+
+        // REMOVED THURSDAY SPECIAL EVENTS BLOCK
+        // if (isTodayFlag && today.getDay() === 4) { ... }
+
         newDaysInMonth.push({ dayNum: i, events: eventsForThisDay, isCurrentMonth: true, isToday: isTodayFlag, date: currentDateObj });
     }
     const totalCells = Math.ceil(newDaysInMonth.length / 7) * 7;
@@ -134,123 +125,109 @@
   }
   function prevMonth() { currentMonth--; if (currentMonth < 0) { currentMonth = 11; currentYear--; } updateCalendarDays(); }
   function nextMonth() { currentMonth++; if (currentMonth > 11) { currentMonth = 0; currentYear++; } updateCalendarDays(); }
-
-  // --- UI Toggles & Modals ---
   function toggleDarkMode() { isDarkMode = !isDarkMode; if (browser) { document.body.classList.toggle('dark', isDarkMode); localStorage.setItem('theme', isDarkMode ? 'dark' : 'light'); } }
   function toggleSidebar() { isSidebarOpen = !isSidebarOpen; }
   function openAddEventForm(dayDateObj?: Date) { showEventForm = true; editingEventId = null; eventTitle = ""; eventDescription = ""; eventFormActionError = null; const dateToUse = dayDateObj || new Date(); eventDate = `${dateToUse.getFullYear()}-${(dateToUse.getMonth() + 1).toString().padStart(2, '0')}-${dateToUse.getDate().toString().padStart(2, '0')}`; eventDueTime = null; eventColor = '#3B82F6'; }
   function closeEventForm() { showEventForm = false; }
   function closeSidebar() { isSidebarOpen = false; }
-  function openTaskDetailsModal(eventId: string) { if (eventId.startsWith('today_thu_evt')) { const specialEvent = daysInMonth.flatMap(d => d.events).find(e => e.id === eventId); if (specialEvent) { selectedTaskForDetails = { id: specialEvent.id, title: specialEvent.title, description: specialEvent.description || "Special event.", isCompleted: false, status: 'pending', priority: 'standard', createdAtISO: null, dueDateISO: new Date(currentYear, currentMonth, daysInMonth.find(d=>d.events.some(ev=>ev.id===eventId))?.dayNum || 1).toISOString().split('T')[0], dueTime: specialEvent.deadlineTime || null, color: specialEvent.color }; showTaskDetailsModal = true; } return; } const task = data.tasks.find(t => t.id === eventId); if (task) { selectedTaskForDetails = task; showTaskDetailsModal = true; } else { console.warn(`Task with ID ${eventId} not found for details modal.`); } }
+  function openTaskDetailsModal(eventId: string) {
+      // Removed specific handling for 'today_thu_evt' as they are removed
+      const task = data.tasks.find(t => t.id === eventId);
+      if (task) {
+          selectedTaskForDetails = task;
+          showTaskDetailsModal = true;
+      } else {
+          console.warn(`Task with ID ${eventId} not found for details modal.`);
+          // Optionally, if you still have other types of non-data.tasks events, handle them here.
+          // For now, we assume all clickable events on calendar come from data.tasks
+      }
+  }
   function closeTaskDetailsModal() { showTaskDetailsModal = false; selectedTaskForDetails = null; }
   function toggleWindow(id: string) { const el = document.getElementById(id); if (el) el.classList.toggle('hidden'); }
   function closeOtherWindows(currentId: string) { dropdownIds.forEach(id => { if (id !== currentId) document.getElementById(id)?.classList.add('hidden'); }); }
   function handleLogout() { if (browser) { localStorage.removeItem('microtask_username'); document.cookie = "userId=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/; SameSite=Lax;"; goto('/login'); } }
 
-  // --- Form Action Handling ---
   const eventFormEnhanceCallback = () => {
-    eventFormActionError = null; // Clear previous specific form error
+    eventFormActionError = null;
     return async ({ result, update }: { result: ActionResult, update: (opts?: { reset?: boolean }) => Promise<void> }) => {
-      console.log('[Calendar Svelte Enhance] AddEvent Action Result:', JSON.stringify(result, null, 2));
+      // console.log('[Calendar Svelte Enhance] AddEvent Action Result:', JSON.stringify(result, null, 2));
       if (result.type === 'success' && result.data?.eventForm?.success) {
         closeEventForm();
-        successMessage = result.data.eventForm.message || 'Event added successfully!'; // Optional success message display
-        await invalidateAll(); // This will re-run the load function and update data.tasks
+        successMessage = result.data.eventForm.message || 'Event added successfully!';
+        if (successMessageTimeoutId) clearTimeout(successMessageTimeoutId);
+        successMessageTimeoutId = window.setTimeout(() => successMessage = null, 3000);
+        await invalidateAll();
       } else if (result.type === 'failure') {
-        const failureData = result.data as { eventForm?: { error?: string; title?: string; description?: string; eventDate?: string; dueTime?: string; color?: string; } };
-        eventFormActionError = failureData?.eventForm?.error || 'Failed to process event. Please check the form.';
-        // Optionally repopulate form fields if needed from failureData.eventForm
-        if (failureData?.eventForm) {
-            eventTitle = failureData.eventForm.title || eventTitle;
-            eventDescription = failureData.eventForm.description || eventDescription;
-            // ... etc.
-        }
+        const failureData = result.data as { eventForm?: { error?: string } };
+        eventFormActionError = failureData?.eventForm?.error || 'Failed to process event.';
       } else if (result.type === 'error') {
-        eventFormActionError = (result.error as Error)?.message || 'An unexpected error occurred with the event form.';
+        eventFormActionError = (result.error as Error)?.message || 'An unexpected error occurred.';
       }
-      // Update an general page error if not specific to form
-      // else if (result.type !== 'success' && result.type !== 'redirect' && !eventFormActionError) {
-      //   pageError = 'An unknown issue occurred with the form submission.';
-      // }
-      await update({ reset: result.type === 'success' && result.data?.eventForm?.success }); // Reset form only on true success
+      await update({ reset: result.type === 'success' && result.data?.eventForm?.success });
     };
   };
-  let successMessage: string | null = null; // For success messages from actions
+  let successMessage: string | null = null;
   let successMessageTimeoutId: number | undefined;
 
-  // --- Reactive Blocks ---
-  $: { // For username and general pageError from data load
-    console.log('[Calendar Svelte Reactive Block - User/Error] Triggered. Current data.user:', data.user, 'Current username state:', username);
+  const handleEscKey = (event: KeyboardEvent) => { if (event.key === 'Escape') { if (showTaskDetailsModal) closeTaskDetailsModal(); else if (showEventForm) closeEventForm(); else if (isSidebarOpen) closeSidebar(); } };
+
+  $: {
+    // console.log('[Calendar Svelte Reactive Block - User/Error] Triggered. Current data.user:', data.user, 'Current username state:', username);
     if (browser) {
       let nameToSet: string | undefined = undefined;
       if (data.user?.name && data.user.name !== "User" && data.user.name !== "User (Calendar Initial Default)" && data.user.name !== "User (Calendar SSR Default)" && data.user.name !== "User (from Calendar Storage Default)") {
         nameToSet = data.user.name;
-        console.log('[Calendar Svelte Reactive Block] `username` will be set from data.user.name:', nameToSet);
-        // if (browser) localStorage.setItem('microtask_username', nameToSet); // Calendar doesn't aggressively set localStorage
       } else {
         const storedName = getStoredUsername();
         if (username !== storedName && (!data.user?.name || data.user.name.startsWith("User (Calendar"))) {
           nameToSet = storedName;
-          console.log('[Calendar Svelte Reactive Block] `username` will be set from getStoredUsername() fallback:', nameToSet);
         }
       }
       if (nameToSet !== undefined && username !== nameToSet) {
           username = nameToSet;
       }
     }
-    pageError = data.error || null; // Update page-level error from load function
+    pageError = data.error || null;
   }
 
-  $: { // For tasks and calendar updates when data.tasks changes
+  $: {
       if (data.tasks) {
-          console.log('[Calendar Svelte Reactive Block - Tasks] data.tasks updated, calling updateCalendarDays. Count:', data.tasks.length);
+          // console.log('[Calendar Svelte Reactive Block - Tasks] data.tasks updated, calling updateCalendarDays. Count:', data.tasks.length);
           updateCalendarDays();
       }
   }
 
-  $: { // For handling form action results specifically for `eventFormActionError`
-      if (form) { // This `form` prop is from `export let form`
-          console.log('[Calendar Svelte Reactive Block - Form Prop] Form prop updated:', JSON.stringify(form, null, 2));
+  $: {
+      if (form) {
+          // console.log('[Calendar Svelte Reactive Block - Form Prop] Form prop updated:', JSON.stringify(form, null, 2));
           if (form.type === 'failure' && form.data?.eventForm?.error) {
               eventFormActionError = form.data.eventForm.error;
-          } else if (form.type === 'success' && form.data?.eventForm?.success) {
-              // Success handled by enhance, but clear specific error if it was set
-              eventFormActionError = null;
+          } else if (form.type === 'success' && form.data?.eventForm?.success){
+              eventFormActionError = null; // Clear error on success
               successMessage = form.data.eventForm.message || 'Operation successful!';
               if (successMessageTimeoutId) clearTimeout(successMessageTimeoutId);
               successMessageTimeoutId = window.setTimeout(() => successMessage = null, 3000);
           }
-          form = null; // Reset after processing to allow detection of next action
+          form = null;
       }
   }
 
-  const handleEscKey = (event: KeyboardEvent) => { if (event.key === 'Escape') { if (showTaskDetailsModal) closeTaskDetailsModal(); else if (showEventForm) closeEventForm(); else if (isSidebarOpen) closeSidebar(); } };
-
-
-  // --- onMount Lifecycle ---
   onMount(() => {
-    console.log('[Calendar Svelte onMount] Component Mounted. Initial data.user:', data.user);
+    // console.log('[Calendar Svelte onMount] Component Mounted. Initial data.user:', data.user);
     let initialUsername = "User (Calendar onMount Default)";
     if (data.user?.name && data.user.name !== "User" && !data.user.name.includes("(Calendar")) {
         initialUsername = data.user.name;
-        console.log('[Calendar Svelte onMount] `username` set from initial data.user.name:', initialUsername);
     } else {
         initialUsername = getStoredUsername();
-        console.log('[Calendar Svelte onMount] `username` set from getStoredUsername() fallback:', initialUsername);
     }
     username = initialUsername;
-
     greeting = getGreeting();
 
     if (browser) {
       const savedTheme = localStorage.getItem('theme');
       isDarkMode = savedTheme === 'dark' || (!savedTheme && window.matchMedia('(prefers-color-scheme: dark)').matches);
       document.body.classList.toggle('dark', isDarkMode);
-
-      const setupIconListener = (iconId: string, windowId: string) => {
-        const iconElement = document.getElementById(iconId);
-        if (iconElement) { iconElement.addEventListener('click', (e) => { e.stopPropagation(); toggleWindow(windowId); closeOtherWindows(windowId); }); }
-      };
+      const setupIconListener = (iconId: string, windowId: string) => { const el = document.getElementById(iconId); if(el) el.addEventListener('click', (e) => { e.stopPropagation(); toggleWindow(windowId); closeOtherWindows(windowId); });};
       setupIconListener('bellIcon', 'notifWindow');
       setupIconListener('helpIcon', 'helpWindow');
       setupIconListener('profileIcon', 'profileWindow');
@@ -258,7 +235,7 @@
       if (darkModeButton) darkModeButton.addEventListener('click', toggleDarkMode);
     }
 
-    const handleGlobalClick = (event: MouseEvent) => { /* ... (keep existing) ... */ const target = event.target as Node | null; const sidebar = document.getElementById('sidebar'); const hamburgerButton = document.getElementById('hamburgerButton'); if (sidebar && !sidebar.contains(target) && hamburgerButton && !hamburgerButton.contains(target) && isSidebarOpen) { closeSidebar(); } let isClickInsideDropdownTrigger = false; const triggerIds = ['bellIcon', 'helpIcon', 'profileIcon']; triggerIds.forEach(triggerId => { const triggerEl = document.getElementById(triggerId); if (triggerEl && triggerEl.contains(target)) isClickInsideDropdownTrigger = true; }); let isClickInsideDropdownWindow = false; dropdownIds.forEach(windowId => { const windowEl = document.getElementById(windowId); if (windowEl && windowEl.contains(target)) isClickInsideDropdownWindow = true; }); if (!isClickInsideDropdownTrigger && !isClickInsideDropdownWindow) closeOtherWindows(''); };
+    const handleGlobalClick = (event: MouseEvent) => { const target = event.target as Node | null; const sidebar = document.getElementById('sidebar'); const hamburgerButton = document.getElementById('hamburgerButton'); if (sidebar && !sidebar.contains(target) && hamburgerButton && !hamburgerButton.contains(target) && isSidebarOpen) { closeSidebar(); } let isClickInsideDropdownTrigger = false; const triggerIds = ['bellIcon', 'helpIcon', 'profileIcon']; triggerIds.forEach(triggerId => { const el = document.getElementById(triggerId); if (el && el.contains(target)) isClickInsideDropdownTrigger = true; }); let isClickInsideDropdownWindow = false; dropdownIds.forEach(windowId => { const el = document.getElementById(windowId); if (el && el.contains(target)) isClickInsideDropdownWindow = true; }); if (!isClickInsideDropdownTrigger && !isClickInsideDropdownWindow) closeOtherWindows(''); };
     document.addEventListener('click', handleGlobalClick);
     document.addEventListener('keydown', handleEscKey);
     const intervalId = setInterval(() => { greeting = getGreeting(); }, 60000);
@@ -282,7 +259,7 @@
 
 <!-- HTML Template (Sidebar, Header, Main Calendar View, Modals) -->
 <div class={`flex h-screen font-sans ${isDarkMode ? 'dark bg-zinc-900 text-zinc-300' : 'bg-gray-100 text-gray-800'}`}>
-  {#if pageError && !eventFormActionError} <!-- Show general page errors if no specific form error -->
+  {#if pageError && !eventFormActionError}
     <div class="fixed top-4 right-4 bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded shadow-md z-[100]" role="alert">
       <strong class="font-bold">Error:</strong>
       <span class="block sm:inline">{pageError}</span>
@@ -313,7 +290,6 @@
           <h1 class={`text-xl font-bold ${isDarkMode ? 'text-zinc-100' : 'text-gray-800'}`}>Microtask</h1>
         </div>
         <nav class="flex flex-col gap-2">
-          <!-- Use currentPath reactive variable -->
           <a href="/home"
              class={`flex items-center gap-3 px-3 py-2 rounded-md font-semibold transition-colors duration-150
                     ${currentPath === '/home' || currentPath === '/' ? (isDarkMode ? 'bg-blue-700 text-white' : 'bg-blue-600 text-white') : (isDarkMode ? 'text-zinc-300 hover:bg-zinc-700' : 'text-gray-700 hover:bg-gray-100')}`}
@@ -400,15 +376,12 @@
             <button on:click={handleLogout} class={`text-xs px-2 py-1.5 rounded w-full text-left transition-colors duration-150 ${isDarkMode ? 'bg-red-700 hover:bg-red-600 text-zinc-300' : 'bg-red-100 hover:bg-red-200 text-red-700'}`}>Logout</button>
           </div>
         </div>
-                  <button id="darkModeToggle" aria-label="Toggle Dark Mode" class={`ml-2 p-1.5 rounded-full transition-colors duration-150 ${isDarkMode ? 'hover:bg-zinc-700 text-zinc-300' : 'hover:bg-gray-100 text-gray-700'}`}>
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-5 h-5">
-              {#if isDarkMode}
-                <path fill-rule="evenodd" d="M9.528 1.718a.75.75 0 0 0-.103.103l1.132 1.132a.75.75 0 0 0 1.06 0l1.132-1.132a.75.75 0 0 0-.103-1.06l-1.132-1.132a.75.75 0 0 0-1.06 0L9.63 1.615a.75.75 0 0 0-.102.103ZM12 3.75a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0v-1.5a.75.75 0 0 1 .75-.75ZM18.282 5.282a.75.75 0 0 0-1.06 0l-1.132 1.132a.75.75 0 0 0 .103 1.06l1.132 1.132a.75.75 0 0 0 1.06 0l1.132-1.132a.75.75 0 0 0-.103-1.06l-1.132-1.132a.75.75 0 0 0 0-.103ZM19.5 12a.75.75 0 0 1-.75.75h-1.5a.75.75 0 0 1 0-1.5h1.5a.75.75 0 0 1 .75.75ZM18.282 18.718a.75.75 0 0 0 0 1.06l1.132 1.132a.75.75 0 0 0 1.06 0l1.132-1.132a.75.75 0 0 0-.103-1.06l-1.132-1.132a.75.75 0 0 0-1.06 0l-1.132 1.132a.75.75 0 0 0 .103.103ZM12 18.75a.75.75 0 0 1-.75.75h-1.5a.75.75 0 0 1 0-1.5h1.5a.75.75 0 0 1 .75.75ZM5.718 18.718a.75.75 0 0 0 1.06 0l1.132-1.132a.75.75 0 0 0-.103-1.06l-1.132-1.132a.75.75 0 0 0-1.06 0L4.586 17.686a.75.75 0 0 0 .103 1.06l1.132 1.132a.75.75 0 0 0 0 .103ZM4.5 12a.75.75 0 0 1 .75-.75h1.5a.75.75 0 0 1 0 1.5h-1.5a.75.75 0 0 1-.75-.75ZM5.718 5.282a.75.75 0 0 0 0-1.06l-1.132-1.132a.75.75 0 0 0-1.06 0L2.39 4.114a.75.75 0 0 0 .103 1.06l1.132 1.132a.75.75 0 0 0 1.06 0l1.132-1.132a.75.75 0 0 0-.103-.103ZM12 6.75a5.25 5.25 0 0 1 5.25 5.25 5.25 5.25 0 0 1-5.25 5.25 5.25 5.25 0 0 1-5.25-5.25 5.25 5.25 0 0 1 5.25-5.25Z" clip-rule="evenodd" />
-              {:else}
-                <path fill-rule="evenodd" d="M10.5 3.75a6.75 6.75 0 1 0 0 13.5 6.75 6.75 0 0 0 0-13.5ZM12 16.5a4.5 4.5 0 1 1 0-9 4.5 4.5 0 0 1 0 9Z" clip-rule="evenodd" />
-              {/if}
-            </svg>
-          </button>
+        <button id="darkModeToggle" aria-label="Toggle Dark Mode" class={`ml-2 p-1.5 rounded-full transition-colors duration-150 ${isDarkMode ? 'hover:bg-zinc-700 text-zinc-300' : 'hover:bg-gray-100 text-gray-700'}`}>
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-5 h-5">
+            {#if isDarkMode} <path fill-rule="evenodd" d="M9.528 1.718a.75.75 0 0 0-.103.103l1.132 1.132a.75.75 0 0 0 1.06 0l1.132-1.132a.75.75 0 0 0-.103-1.06l-1.132-1.132a.75.75 0 0 0-1.06 0L9.63 1.615a.75.75 0 0 0-.102.103ZM12 3.75a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0v-1.5a.75.75 0 0 1 .75-.75ZM18.282 5.282a.75.75 0 0 0-1.06 0l-1.132 1.132a.75.75 0 0 0 .103 1.06l1.132 1.132a.75.75 0 0 0 1.06 0l1.132-1.132a.75.75 0 0 0-.103-1.06l-1.132-1.132a.75.75 0 000-.103ZM19.5 12a.75.75 0 01-.75.75h-1.5a.75.75 0 010-1.5h1.5a.75.75 0 01.75.75ZM18.282 18.718a.75.75 0 000 1.06l1.132 1.132a.75.75 0 001.06 0l1.132-1.132a.75.75 0 00-.103-1.06l-1.132-1.132a.75.75 0 00-1.06 0l-1.132 1.132a.75.75 0 00.103.103ZM12 18.75a.75.75 0 01-.75.75h-1.5a.75.75 0 010-1.5h1.5a.75.75 0 01.75.75ZM5.718 18.718a.75.75 0 001.06 0l1.132-1.132a.75.75 0 00-.103-1.06l-1.132-1.132a.75.75 0 00-1.06 0L4.586 17.686a.75.75 0 00.103 1.06l1.132 1.132a.75.75 0 000-.103ZM4.5 12a.75.75 0 01.75-.75h1.5a.75.75 0 010 1.5h-1.5a.75.75 0 01-.75-.75ZM5.718 5.282a.75.75 0 000-1.06l-1.132-1.132a.75.75 0 00-1.06 0L2.39 4.114a.75.75 0 00.103 1.06l1.132 1.132a.75.75 0 001.06 0l1.132-1.132a.75.75 0 00-.103-.103ZM12 6.75a5.25 5.25 0 015.25 5.25 5.25 5.25 0 01-5.25 5.25 5.25 5.25 0 01-5.25-5.25 5.25 5.25 0 015.25-5.25Z" clip-rule="evenodd" />
+            {:else} <path fill-rule="evenodd" d="M10.5 3.75a6.75 6.75 0 1 0 0 13.5 6.75 6.75 0 0 0 0-13.5ZM12 16.5a4.5 4.5 0 1 1 0-9 4.5 4.5 0 010 9Z" clip-rule="evenodd" /> {/if}
+          </svg>
+        </button>
       </div>
     </header>
 
@@ -461,7 +434,7 @@
   {#if showTaskDetailsModal && selectedTaskForDetails} <div class="fixed inset-0 z-[70] flex items-center justify-center bg-black bg-opacity-50 p-4 backdrop-blur-sm" on:click|self={closeTaskDetailsModal} transition:fade={{ duration: 150 }} role="dialog" aria-modal="true" aria-labelledby="task-details-title"> <div class={`rounded-lg shadow-xl w-full max-w-md max-h-[90vh] flex flex-col overflow-hidden ${isDarkMode ? 'bg-zinc-800 text-zinc-300' : 'bg-white text-gray-800'}`} on:click|stopPropagation transition:scale={{ duration: 200, start: 0.95, opacity: 0.5 }}> <div class={`flex justify-between items-center p-4 sm:p-5 border-b flex-shrink-0 ${isDarkMode ? 'border-zinc-700' : 'border-gray-200'}`}> <h3 id="task-details-title" class="text-lg sm:text-xl font-semibold">Task Details</h3> <button type="button" class={`p-1 rounded-full focus:outline-none focus:ring-2 focus:ring-offset-2 transition-colors duration-150 ${isDarkMode ? 'text-zinc-400 hover:bg-zinc-700 focus:ring-zinc-600' : 'text-gray-400 hover:bg-gray-100 hover:text-gray-600 focus:ring-gray-400'}`} on:click={closeTaskDetailsModal} aria-label="Close task details"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-6 h-6"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12" /></svg></button> </div> <div class="flex-grow overflow-y-auto p-4 sm:p-5 space-y-3 custom-scrollbar"> <div class="flex items-center mb-2"><span class="w-4 h-4 rounded-full mr-2 flex-shrink-0" style="background-color: {selectedTaskForDetails.color || '#3B82F6'};"></span><h4 class="text-xl font-semibold break-words" style="color: {selectedTaskForDetails.color || (isDarkMode ? '#E5E7EB' : '#1F2937')};">{selectedTaskForDetails.title}</h4></div> {#if selectedTaskForDetails.description}<div><p class={`text-sm font-medium mb-0.5 ${isDarkMode ? 'text-zinc-200' : 'text-gray-700'}`}>Description:</p><p class={`text-sm whitespace-pre-wrap p-2 rounded ${isDarkMode ? 'text-zinc-400 bg-zinc-700' : 'text-gray-600 bg-gray-50'}`}>{selectedTaskForDetails.description}</p></div>{/if} <div class="grid grid-cols-1 sm:grid-cols-2 gap-3"><div><p class={`text-xs font-medium mb-0.5 ${isDarkMode ? 'text-zinc-300' : 'text-gray-500'}`}>DUE DATE</p><p class={`text-sm ${isDarkMode ? 'text-zinc-100' : 'text-gray-700'}`}>{selectedTaskForDetails.dueDateISO ? new Date(selectedTaskForDetails.dueDateISO + 'T00:00:00Z').toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric', timeZone: 'UTC' }) : 'Not set'}</p></div> {#if selectedTaskForDetails.dueTime}<div><p class={`text-xs font-medium mb-0.5 ${isDarkMode ? 'text-zinc-300' : 'text-gray-500'}`}>DEADLINE TIME</p><p class={`text-sm ${isDarkMode ? 'text-zinc-100' : 'text-gray-700'}`}>{selectedTaskForDetails.dueTime}</p></div>{/if}</div> <div class="grid grid-cols-1 sm:grid-cols-2 gap-3"><div><p class={`text-xs font-medium mb-0.5 ${isDarkMode ? 'text-zinc-300' : 'text-gray-500'}`}>STATUS</p><span class={`px-2 py-0.5 text-xs font-semibold rounded-full inline-block ${selectedTaskForDetails.status === 'complete' ? (isDarkMode ? 'bg-green-700 text-green-200' : 'bg-green-100 text-green-800') : selectedTaskForDetails.status === 'pending' ? (isDarkMode ? 'bg-yellow-700 text-yellow-200' : 'bg-yellow-100 text-yellow-800') : selectedTaskForDetails.status === 'incomplete' ? (isDarkMode ? 'bg-red-700 text-red-200' : 'bg-red-100 text-red-800') : selectedTaskForDetails.status === 'late' ? (isDarkMode ? 'bg-orange-600 text-orange-100' : 'bg-orange-100 text-orange-700') : (isDarkMode ? 'bg-zinc-600 text-zinc-300' : 'bg-gray-200 text-gray-700') }`}>{selectedTaskForDetails.status.charAt(0).toUpperCase() + selectedTaskForDetails.status.slice(1)}</span></div> {#if selectedTaskForDetails.priority}<div><p class={`text-xs font-medium mb-0.5 ${isDarkMode ? 'text-zinc-300' : 'text-gray-500'}`}>PRIORITY</p><p class={`text-sm ${isDarkMode ? 'text-zinc-100' : 'text-gray-700'}`}>{typeof selectedTaskForDetails.priority === 'string' ? selectedTaskForDetails.priority.charAt(0).toUpperCase() + selectedTaskForDetails.priority.slice(1) : selectedTaskForDetails.priority}</p></div>{/if}</div> {#if selectedTaskForDetails.createdAtISO}<div><p class={`text-xs font-medium mb-0.5 ${isDarkMode ? 'text-zinc-300' : 'text-gray-500'}`}>CREATED</p><p class={`text-sm ${isDarkMode ? 'text-zinc-400' : 'text-gray-600'}`}>{new Date(selectedTaskForDetails.createdAtISO).toLocaleString(undefined, {dateStyle: 'medium', timeStyle: 'short'})}</p></div>{/if}</div> <div class={`flex justify-end p-4 sm:p-5 border-t flex-shrink-0 ${isDarkMode ? 'bg-zinc-750 border-zinc-700' : 'bg-gray-50 border-gray-200'}`}><button type="button" class={`w-full sm:w-auto px-4 py-2 rounded-md focus:outline-none focus:ring-2 focus:ring-offset-2 transition-colors duration-150 ${isDarkMode ? 'bg-zinc-600 text-zinc-300 hover:bg-zinc-500 focus:ring-zinc-500' : 'bg-gray-200 text-gray-800 hover:bg-gray-300 focus:ring-gray-400'}`} on:click={closeTaskDetailsModal}>Close</button></div> </div> </div> {/if}
 </div>
 
-<style> 
+<style>
   /* ... (existing styles - ensure the styles for .filter-button-icon are not needed or adapted for SVGs if they were for PNGs) ... */
   .font-sans { font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
   :global(body, html) { height: 100%; margin: 0; padding: 0; overflow: hidden; }
