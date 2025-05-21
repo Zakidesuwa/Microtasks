@@ -27,8 +27,8 @@
         // errorMessage = null; // Clear previous session-specific errors
 
         try {
-            console.log('[Login Page] Attempting to create server session...');
-            const response = await fetch('/api/auth/session-login', {
+            console.log('[Login Page] Attempting to create server session with ID token...');
+            const response = await fetch('/api/auth/session-login', { // CORRECTED URL
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -37,7 +37,7 @@
             });
 
             if (!response.ok) {
-                const errorData = await response.json().catch(() => ({ error: `Server responded with ${response.status}` }));
+                const errorData = await response.json().catch(() => ({ error: `Server responded with ${response.status} to /api/auth/session-login` }));
                 console.error('[Login Page] Failed to create server session:', errorData.error || response.statusText);
                 // Set a general error message if a specific one isn't available
                 errorMessage = errorData.error || 'Could not complete login with the server. Please try again.';
@@ -45,10 +45,10 @@
             }
 
             const sessionData = await response.json();
-            console.log('[Login Page] Server session cookie created successfully:', sessionData);
+            console.log('[Login Page] Server session cookie created successfully via /api/auth/session-login:', sessionData);
             return true; // Indicate success
         } catch (error: any) {
-            console.error('[Login Page] Exception in createServerSession:', error);
+            console.error('[Login Page] Exception in createServerSession when calling /api/auth/session-login:', error);
             errorMessage = error.message || 'A network error occurred while finalizing login. Please check your connection and try again.';
             return false; // Indicate failure
         }
