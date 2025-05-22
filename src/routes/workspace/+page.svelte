@@ -50,18 +50,30 @@
 		}
 	}
 
-	const topHeaderDropdownIds = ['notifWindow', 'helpWindow', 'profileWindow'];
-	function toggleHeaderWindow(id: string) {
-		const el = document.getElementById(id);
-		if (el) el.classList.toggle('dropdown-window-hidden');
-	}
-	function closeOtherHeaderWindows(currentId: string) {
-		topHeaderDropdownIds.forEach(id => {
-			if (id !== currentId) {
-				document.getElementById(id)?.classList.add('dropdown-window-hidden');
-			}
-		});
-	}
+    // Adapted from example
+	const dropdownIds = ['notifWindow', 'helpWindow', 'profileWindow'];
+	function toggleWindow(id: string) {
+        const el = document.getElementById(id);
+        if (el) {
+            const isHidden = el.classList.contains('hidden-dropdown');
+            el.classList.toggle('hidden-dropdown');
+            if (isHidden) { // If it *was* hidden, and now it's being shown
+                closeOtherWindows(id);
+            }
+        }
+    }
+    function closeOtherWindows(currentId: string) {
+        dropdownIds.forEach(id => {
+            if (id !== currentId) {
+                const el = document.getElementById(id);
+                // Only add if not already hidden, to avoid redundant class operations
+                if (el && !el.classList.contains('hidden-dropdown')) {
+                    el.classList.add('hidden-dropdown');
+                }
+            }
+        });
+    }
+
 
 	// Add Board Modal
 	let showAddBoardModal = false;
@@ -224,8 +236,8 @@
 		}
 	}
 
-	let globalClickListener: ((event: MouseEvent) => void) | null = null;
-	let escKeyListener: ((event: KeyboardEvent) => void) | null = null;
+	let handleGlobalClickListener: ((event: MouseEvent) => void) | null = null;
+	let handleEscKeyListener: ((event: KeyboardEvent) => void) | null = null;
 
 	onMount(() => {
 		username = data.user?.name || getStoredUsername(); 
@@ -244,16 +256,20 @@
 			}
 
 			const darkModeButton = document.getElementById('darkModeToggle');
-			if (darkModeButton) darkModeButton.addEventListener('click', toggleDarkMode);
+            if (darkModeButton) {
+                // Store listener to remove it in onDestroy
+                (darkModeButton as any).__clickHandler = toggleDarkMode;
+                darkModeButton.addEventListener('click', (darkModeButton as any).__clickHandler);
+            }
 
+            // Adapted from example for icon listeners
 			const setupIconListener = (iconId: string, windowId: string) => {
 				const iconElement = document.getElementById(iconId);
 				if (iconElement) {
-					iconElement.addEventListener('click', (e) => {
-						e.stopPropagation();
-						toggleHeaderWindow(windowId);
-						closeOtherHeaderWindows(windowId);
-					});
+                    const listener = (e: Event) => { e.stopPropagation(); toggleWindow(windowId); };
+                    iconElement.addEventListener('click', listener);
+                    // Store listener to remove it in onDestroy
+                    (iconElement as any).__clickHandler = listener;
 				}
 			};
 			setupIconListener('bellIcon', 'notifWindow');
@@ -261,7 +277,7 @@
 			setupIconListener('profileIcon', 'profileWindow');
 		}
 
-		globalClickListener = (event: MouseEvent) => {
+		handleGlobalClickListener = (event: MouseEvent) => {
 			const target = event.target as Node | null;
 			let isClickInsideDropdownTrigger = false;
 			const triggerIds = ['bellIcon', 'helpIcon', 'profileIcon'];
@@ -269,15 +285,17 @@
 				const triggerEl = document.getElementById(triggerId);
 				if (triggerEl && triggerEl.contains(target)) isClickInsideDropdownTrigger = true;
 			});
+
 			let isClickInsideDropdownWindow = false;
-			topHeaderDropdownIds.forEach(windowId => {
+			dropdownIds.forEach(windowId => {
 				const windowEl = document.getElementById(windowId);
-				if (windowEl && !windowEl.classList.contains('dropdown-window-hidden') && windowEl.contains(target)) {
+				if (windowEl && !windowEl.classList.contains('hidden-dropdown') && windowEl.contains(target)) {
 					isClickInsideDropdownWindow = true;
 				}
 			});
+
 			if (!isClickInsideDropdownTrigger && !isClickInsideDropdownWindow) {
-				closeOtherHeaderWindows('');
+				closeOtherWindows(''); // Pass empty string or null to close all
 			}
 
 			const sidebarEl = document.getElementById('sidebar');
@@ -294,34 +312,43 @@
 			modals.forEach(modal => {
 				const modalEl = document.getElementById(modal.modalId);
 				if (modal.condition && modalEl && !modalEl.contains(target as Node)) {
-					const overlayEl = modalEl.parentElement; // This should be the modal-overlay div
+					const overlayEl = modalEl.parentElement; 
                     if (overlayEl && overlayEl.classList.contains('modal-overlay') && overlayEl === event.target) {
 						modal.closeFn();
 					}
 				}
 			});
 		};
-		document.addEventListener('click', globalClickListener);
+		if (browser) document.addEventListener('click', handleGlobalClickListener);
 
-		escKeyListener = (event: KeyboardEvent) => {
+		handleEscKeyListener = (event: KeyboardEvent) => {
 			if (event.key === 'Escape') {
 				if (isSidebarOpen) closeSidebar();
 				if (showAddBoardModal) closeAddBoardModal();
 				if (showDeleteBoardConfirm) closeDeleteBoardConfirm();
 				if (showTemplateUsageModal) closeTemplateUsageModal();
-				closeOtherHeaderWindows(''); 
+				closeOtherWindows(''); 
 			}
 		};
-		document.addEventListener('keydown', escKeyListener);
+		if (browser) document.addEventListener('keydown', handleEscKeyListener);
 	});
 
 	onDestroy(() => {
 		if (browser) {
-			if(globalClickListener) document.removeEventListener('click', globalClickListener);
-			if(escKeyListener) document.removeEventListener('keydown', escKeyListener);
+			if(handleGlobalClickListener) document.removeEventListener('click', handleGlobalClickListener);
+			if(handleEscKeyListener) document.removeEventListener('keydown', handleEscKeyListener);
 			
 			const darkModeButton = document.getElementById('darkModeToggle');
-			if (darkModeButton) darkModeButton.removeEventListener('click', toggleDarkMode);
+			if (darkModeButton && (darkModeButton as any).__clickHandler) {
+                darkModeButton.removeEventListener('click', (darkModeButton as any).__clickHandler);
+            }
+
+            ['bellIcon', 'helpIcon', 'profileIcon'].forEach(iconId => {
+                const iconElement = document.getElementById(iconId);
+                if (iconElement && (iconElement as any).__clickHandler) {
+                    iconElement.removeEventListener('click', (iconElement as any).__clickHandler);
+                }
+            });
 		}
 	});
 
@@ -340,55 +367,52 @@
           <h1 class={`text-xl font-bold ${isDarkMode ? 'text-zinc-100' : 'text-gray-800'}`}>Microtask</h1>
         </div>
         <nav class="flex flex-col gap-2">
-          <a href="/home" class="flex items-center gap-3 px-3 py-2 rounded-md font-semibold transition-colors duration-150" class:bg-blue-600={!isDarkMode} class:bg-blue-800={isDarkMode} class:text-white={true} class:hover:bg-gray-100={!isDarkMode} class:hover:bg-zinc-700={isDarkMode}>
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-5 h-5" aria-hidden="true">
+          <a href="/home" class="flex items-center gap-3 px-3 py-2 rounded-md font-semibold transition-colors duration-150 nav-link" 
+             class:active={$page.url.pathname === '/home' || $page.url.pathname === '/'}>
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-5 h-5 nav-link-icon" aria-hidden="true">
               <path d="M11.47 3.84a.75.75 0 011.06 0l8.69 8.69a.75.75 0 101.06-1.06l-8.689-8.69a2.25 2.25 0 00-3.182 0l-8.69 8.69a.75.75 0 001.061 1.06l8.69-8.69z" />
               <path d="M12 5.432l8.159 8.159c.03.03.06.058.091.086v6.198c0 1.035-.84 1.875-1.875 1.875H15a.75.75 0 01-.75-.75v-4.5a.75.75 0 00-.75-.75h-3a.75.75 0 00-.75.75V21a.75.75 0 01-.75.75H5.625a1.875 1.875 0 01-1.875-1.875v-6.198a2.29 2.29 0 00.091-.086L12 5.43z" />
             </svg>
             <span>Home</span>
           </a>
           <a href="/dashboard" 
-             class="flex items-center gap-3 px-3 py-2 rounded-md font-semibold transition-colors duration-150"
-             class:bg-blue-600={!isDarkMode && $page.url.pathname === '/dashboard'} 
-             class:bg-blue-800={isDarkMode && $page.url.pathname === '/dashboard'} 
-             class:text-white={$page.url.pathname === '/dashboard'}
-             class:text-gray-700={!isDarkMode && $page.url.pathname !== '/dashboard'}
-             class:text-zinc-300={isDarkMode && $page.url.pathname !== '/dashboard'}
-             class:hover:bg-gray-100={!isDarkMode} 
-             class:hover:bg-zinc-700={isDarkMode}
+             class="flex items-center gap-3 px-3 py-2 rounded-md font-semibold transition-colors duration-150 nav-link"
+             class:active={$page.url.pathname === '/dashboard'}
           >
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-5 h-5" aria-hidden="true">
-              <path d="M10.5 4.5a1.5 1.5 0 00-3 0v15a1.5 1.5 0 003 0V4.5z" />
-              <path d="M4.5 10.5a1.5 1.5 0 000 3h15a1.5 1.5 0 000-3h-15z" /> 
-              <path fill-rule="evenodd" d="M1.5 3A1.5 1.5 0 013 1.5h18A1.5 1.5 0 0122.5 3v18a1.5 1.5 0 01-1.5 1.5H3A1.5 1.5 0 011.5 21V3zm1.5.75v16.5h16.5V3.75H3z" clip-rule="evenodd" />
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-5 h-5 nav-link-icon" aria-hidden="true">
+              <path fill-rule="evenodd" d="M1.5 3A1.5 1.5 0 013 1.5h18A1.5 1.5 0 0122.5 3v18a1.5 1.5 0 01-1.5 1.5H3A1.5 1.5 0 011.5 21V3zm1.5.75v16.5h16.5V3.75H3zM10.5 4.5a1.5 1.5 0 00-3 0v15a1.5 1.5 0 003 0V4.5zm-6 6a1.5 1.5 0 000 3h15a1.5 1.5 0 000-3h-15z" clip-rule="evenodd" />
             </svg>
             <span>Dashboard</span>
           </a>
-          <a href="/tasks" class="flex items-center gap-3 px-3 py-2 rounded-md font-semibold transition-colors duration-150" class:hover:bg-gray-100={!isDarkMode} class:hover:bg-zinc-700={isDarkMode} class:text-gray-700={!isDarkMode} class:text-zinc-300={isDarkMode}>
-            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5" aria-hidden="true">
+          <a href="/tasks" class="flex items-center gap-3 px-3 py-2 rounded-md font-semibold transition-colors duration-150 nav-link"
+             class:active={$page.url.pathname.startsWith('/tasks')}>
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 nav-link-icon-stroked" aria-hidden="true">
               <path stroke-linecap="round" stroke-linejoin="round" d="M9 12h3.75M9 15h3.75M9 18h3.75m3 .75H18a2.25 2.25 0 0 0 2.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 0 0-1.123-.08m-5.801 0c-.065.21-.1.433-.1.664 0 .414.336.75.75.75h4.5a.75.75 0 0 0 .75-.75 2.25 2.25 0 0 0-.1-.664m-5.8 0A2.251 2.251 0 0 1 13.5 2.25H15c1.012 0 1.867.668 2.15 1.586m-5.8 0c-.376.023-.75.05-1.124.08C9.095 4.01 8.25 4.973 8.25 6.108V8.25m0 0H4.875c-.621 0-1.125.504-1.125 1.125v11.25c0 .621.504 1.125 1.125 1.125h9.75c.621 0 1.125-.504 1.125-1.125V9.375c0-.621-.504-1.125-1.125-1.125H8.25ZM6.75 12h.008v.008H6.75V12Zm0 3h.008v.008H6.75V15Zm0 3h.008v.008H6.75V18Z" />
             </svg>
             <span>All Tasks</span>
           </a>
-          <a href="/calendar" class="flex items-center gap-3 px-3 py-2 rounded-md font-semibold transition-colors duration-150" class:hover:bg-gray-100={!isDarkMode} class:hover:bg-zinc-700={isDarkMode} class:text-gray-700={!isDarkMode} class:text-zinc-300={isDarkMode}>
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-5 h-5" aria-hidden="true">
+          <a href="/calendar" class="flex items-center gap-3 px-3 py-2 rounded-md font-semibold transition-colors duration-150 nav-link"
+             class:active={$page.url.pathname === '/calendar'}>
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-5 h-5 nav-link-icon" aria-hidden="true">
               <path fill-rule="evenodd" d="M6.75 2.25A.75.75 0 017.5 3v1.5h9V3A.75.75 0 0118 3v1.5h.75a3 3 0 013 3v11.25a3 3 0 01-3 3H5.25a3 3 0 01-3-3V7.5a3 3 0 013-3H6V3a.75.75 0 01.75-.75zM5.25 6.75c-.621 0-1.125.504-1.125 1.125V18a1.125 1.125 0 001.125 1.125h13.5A1.125 1.125 0 0019.875 18V7.875c0-.621-.504-1.125-1.125-1.125H5.25z" clip-rule="evenodd" /><path d="M10.5 9.75a.75.75 0 00-1.5 0v.01c0 .414.336.75.75.75H10.5v-.01a.75.75 0 000-1.5zM10.5 12.75a.75.75 0 00-1.5 0v.01c0 .414.336.75.75.75H10.5v-.01a.75.75 0 000-1.5zM10.5 15.75a.75.75 0 00-1.5 0v.01c0 .414.336.75.75.75H10.5v-.01a.75.75 0 000-1.5zM13.5 9.75a.75.75 0 00-1.5 0v.01c0 .414.336.75.75.75H13.5v-.01a.75.75 0 000-1.5zM13.5 12.75a.75.75 0 00-1.5 0v.01c0 .414.336.75.75.75H13.5v-.01a.75.75 0 000-1.5zM13.5 15.75a.75.75 0 00-1.5 0v.01c0 .414.336.75.75.75H13.5v-.01a.75.75 0 000-1.5zM16.5 9.75a.75.75 0 00-1.5 0v.01c0 .414.336.75.75.75H16.5v-.01a.75.75 0 000-1.5zM16.5 12.75a.75.75 0 00-1.5 0v.01c0 .414.336.75.75.75H16.5v-.01a.75.75 0 000-1.5zM16.5 15.75a.75.75 0 00-1.5 0v.01c0 .414.336.75.75.75H16.5v-.01a.75.75 0 000-1.5z"/></svg>
             <span>Calendar</span>
           </a>
-          <a href="/workspace" class="flex items-center gap-3 px-3 py-2 rounded-md font-semibold transition-colors duration-150" class:hover:bg-gray-100={!isDarkMode} class:hover:bg-zinc-700={isDarkMode} class:text-gray-700={!isDarkMode} class:text-zinc-300={isDarkMode}>
-            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5" aria-hidden="true">
+          <a href="/workspace" class="flex items-center gap-3 px-3 py-2 rounded-md font-semibold transition-colors duration-150 nav-link"
+             class:active={$page.url.pathname.startsWith('/workspace')}>
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 nav-link-icon-stroked" aria-hidden="true">
               <path stroke-linecap="round" stroke-linejoin="round" d="M20.25 14.15v4.098a2.25 2.25 0 0 1-2.25 2.25h-12a2.25 2.25 0 0 1-2.25-2.25V14.15M18 18.75h.75A2.25 2.25 0 0 0 21 16.5v-1.5a2.25 2.25 0 0 0-2.25-2.25h-15A2.25 2.25 0 0 0 1.5 15v1.5A2.25 2.25 0 0 0 3.75 18.75H4.5M12 12.75a3 3 0 0 0-3-3H5.25V7.5a3 3 0 0 1 3-3h7.5a3 3 0 0 1 3 3v2.25H15a3 3 0 0 0-3 3Z" />
             </svg>
             <span>Workspace</span>
           </a>
-          <a href="/ai-chat" class="flex items-center gap-3 px-3 py-2 rounded-md font-semibold transition-colors duration-150" class:hover:bg-gray-100={!isDarkMode} class:hover:bg-zinc-700={isDarkMode} class:text-gray-700={!isDarkMode} class:text-zinc-300={isDarkMode}>
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-5 h-5" aria-hidden="true"><path d="M12.001 2.504a2.34 2.34 0 00-2.335 2.335v.583c0 .582.212 1.13.582 1.556l.03.035-.03.034a2.34 2.34 0 00-2.917 3.916A3.287 3.287 0 004.08 14.25a3.287 3.287 0 003.287 3.287h8.266a3.287 3.287 0 003.287-3.287 3.287 3.287 0 00-1.253-2.583 2.34 2.34 0 00-2.917-3.916l-.03-.034.03-.035c.37-.425.582-.973.582-1.555v-.583a2.34 2.34 0 00-2.335-2.336h-.002zM9.75 12.75a.75.75 0 000 1.5h4.5a.75.75 0 000-1.5h-4.5z" /><path fill-rule="evenodd" d="M12 1.5c5.79 0 10.5 4.71 10.5 10.5S17.79 22.5 12 22.5 1.5 17.79 1.5 12 6.21 1.5 12 1.5zM2.85 12a9.15 9.15 0 019.15-9.15 9.15 9.15 0 019.15 9.15 9.15 9.15 0 01-9.15 9.15A9.15 9.15 0 012.85 12z" clip-rule="evenodd" /></svg>
+          <a href="/ai-chat" class="flex items-center gap-3 px-3 py-2 rounded-md font-semibold transition-colors duration-150 nav-link"
+            class:active={$page.url.pathname === '/ai-chat'}>
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-5 h-5 nav-link-icon" aria-hidden="true"><path d="M12.001 2.504a2.34 2.34 0 00-2.335 2.335v.583c0 .582.212 1.13.582 1.556l.03.035-.03.034a2.34 2.34 0 00-2.917 3.916A3.287 3.287 0 004.08 14.25a3.287 3.287 0 003.287 3.287h8.266a3.287 3.287 0 003.287-3.287 3.287 3.287 0 00-1.253-2.583 2.34 2.34 0 00-2.917-3.916l-.03-.034.03-.035c.37-.425.582-.973.582-1.555v-.583a2.34 2.34 0 00-2.335-2.336h-.002zM9.75 12.75a.75.75 0 000 1.5h4.5a.75.75 0 000-1.5h-4.5z" /><path fill-rule="evenodd" d="M12 1.5c5.79 0 10.5 4.71 10.5 10.5S17.79 22.5 12 22.5 1.5 17.79 1.5 12 6.21 1.5 12 1.5zM2.85 12a9.15 9.15 0 019.15-9.15 9.15 9.15 0 019.15 9.15 9.15 9.15 0 01-9.15 9.15A9.15 9.15 0 012.85 12z" clip-rule="evenodd" /></svg>
             <span>Ask Synthia</span>
           </a>
         </nav>
       </div>
-      <button on:click={handleLogout} class="flex items-center gap-3 px-3 py-2 rounded-md font-semibold w-full mt-auto transition-colors duration-150" class:hover:bg-gray-100={!isDarkMode} class:hover:bg-zinc-700={isDarkMode} class:text-gray-700={!isDarkMode} class:text-zinc-300={isDarkMode}>
-        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0 0 13.5 3h-6a2.25 2.25 0 0 0-2.25 2.25v13.5A2.25 2.25 0 0 0 7.5 21h6a2.25 2.25 0 0 0 2.25-2.25V15m3 0 3-3m0 0-3-3m3 3H9" /></svg>
+      <button on:click={handleLogout} class="logout-button flex items-center gap-3 px-3 py-2 rounded-md font-semibold w-full mt-auto transition-colors duration-150">
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 logout-button-icon" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0 0 13.5 3h-6a2.25 2.25 0 0 0-2.25 2.25v13.5A2.25 2.25 0 0 0 7.5 21h6a2.25 2.25 0 0 0 2.25-2.25V15m3 0 3-3m0 0-3-3m3 3H9" /></svg>
         <span>Log out</span>
       </button>
     </div>
@@ -410,7 +434,7 @@
           <button id="bellIcon" aria-label="Notifications">
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-5 h-5" aria-hidden="true"><path fill-rule="evenodd" d="M5.25 9a6.75 6.75 0 0113.5 0v.75c0 2.123.8 4.057 2.118 5.52a.75.75 0 01-.297 1.206c-1.544.57-3.16.99-4.831 1.243a3.75 3.75 0 11-7.48 0c-1.673-.253-3.287-.673-4.831-1.243a.75.75 0 01-.297-1.206C4.45 13.807 5.25 11.873 5.25 9.75V9zm4.502 8.9a2.25 2.25 0 104.496 0H9.752z" clip-rule="evenodd" /></svg>
           </button>
-          <div id="notifWindow" class={`dropdown-window hidden ${isDarkMode ? 'bg-zinc-700 border-zinc-600 text-zinc-300' : 'bg-white border-gray-200 text-gray-700'}`}>
+          <div id="notifWindow" class={`dropdown-window hidden-dropdown ${isDarkMode ? 'bg-zinc-700 border-zinc-600 text-zinc-300' : 'bg-white border-gray-200 text-gray-700'}`}>
             <h3 class="font-semibold mb-2 text-sm">Notifications</h3><p class="text-xs">No new notifications.</p>
           </div>
         </div>
@@ -418,20 +442,20 @@
           <button id="helpIcon" aria-label="Help & FAQ">
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-5 h-5" aria-hidden="true"><path fill-rule="evenodd" d="M2.25 12c0-5.385 4.365-9.75 9.75-9.75s9.75 4.365 9.75 9.75-4.365 9.75-9.75 9.75S2.25 17.385 2.25 12zm8.706-1.442c1.146-.573 2.437.463 2.126 1.706l-.709 2.836.042-.02a.75.75 0 01.67 1.34l-.042.022c-1.147.573-2.438-.463-2.127-1.706l.71-2.836-.042.02a.75.75 0 11-.671-1.34l.041-.022zM12 9a.75.75 0 100-1.5.75.75 0 000 1.5z" clip-rule="evenodd" /></svg>
           </button>
-          <div id="helpWindow" class={`dropdown-window hidden ${isDarkMode ? 'bg-zinc-700 border-zinc-600 text-zinc-300' : 'bg-white border-gray-200 text-gray-700'}`}>
+          <div id="helpWindow" class={`dropdown-window hidden-dropdown ${isDarkMode ? 'bg-zinc-700 border-zinc-600 text-zinc-300' : 'bg-white border-gray-200 text-gray-700'}`}>
             <h3 class="font-semibold mb-2 text-sm">FAQ</h3>
             <ul class="list-disc list-inside space-y-1 text-xs"><li>How do I add a task?</li><li>Where is the calendar?</li></ul>
-            <a href="/support" class="text-xs text-blue-600 hover:underline mt-2 block">Visit Support</a>
+            <a href="/support" class="text-xs text-blue-600 hover:underline mt-2 block dropdown-support-link">Visit Support</a>
           </div>
         </div>
         <div class="relative">
           <button id="profileIcon" aria-label="Profile Menu">
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-5 h-5" aria-hidden="true"><path fill-rule="evenodd" d="M18.685 19.097A9.723 9.723 0 0021.75 12c0-5.385-4.365-9.75-9.75-9.75S2.25 6.615 2.25 12a9.723 9.723 0 003.065 7.097A9.716 9.716 0 0012 21.75a9.716 9.716 0 006.685-2.653zm-12.54-1.285A7.486 7.486 0 0112 15a7.486 7.486 0 015.855 2.812A8.224 8.224 0 0112 20.25a8.224 8.224 0 01-5.855-2.438zM15.75 9a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0z" clip-rule="evenodd" /></svg>
           </button>
-          <div id="profileWindow" class={`dropdown-window hidden ${isDarkMode ? 'bg-zinc-700 border-zinc-600 text-zinc-300' : 'bg-white border-gray-200 text-gray-700'}`}>
+          <div id="profileWindow" class={`dropdown-window hidden-dropdown ${isDarkMode ? 'bg-zinc-700 border-zinc-600 text-zinc-300' : 'bg-white border-gray-200 text-gray-700'}`}>
             <h3 class="font-semibold mb-2 text-sm">Profile</h3>
-            <p class="text-xs mb-2 truncate">Welcome, {username || 'User'}!</p>
-            <button on:click={handleLogout} class={`text-xs px-2 py-1.5 rounded w-full text-left transition-colors duration-150 ${isDarkMode ? 'bg-red-700 hover:bg-red-600 text-zinc-300' : 'bg-red-100 hover:bg-red-200 text-red-700'}`}>Logout</button>
+            <p class="text-xs mb-2 truncate profile-welcome-msg">Welcome, {username || 'User'}!</p>
+            <button on:click={handleLogout} class="dropdown-button-danger text-xs px-2 py-1.5 rounded w-full text-left transition-colors duration-150">Logout</button>
           </div>
         </div>
         <button id="darkModeToggle" aria-label="Toggle Dark Mode" class={`ml-2 p-1.5 rounded-full transition-colors duration-150 ${isDarkMode ? 'hover:bg-zinc-700 text-zinc-300' : 'hover:bg-gray-100 text-gray-700'}`}>
@@ -772,6 +796,7 @@
 
     --light-accent-primary: #007BFF; /* Primary blue */
     --light-accent-primary-hover: #0056b3;
+    --light-accent-primary-active: #007BFF; /* For nav-link.active */
     --light-accent-primary-text: var(--light-text-link); /* For text links or icons needing this blue */
 
     --light-accent-success: #28A745; /* Green */
@@ -811,6 +836,7 @@
 
     --dark-accent-primary: #36A3FF; /* Primary blue for dark mode */
     --dark-accent-primary-hover: #0B8EFF;
+    --dark-accent-primary-active: #1E40AF; /* For nav-link.active in dark mode (example used bg-blue-800) */
     --dark-accent-primary-text: var(--dark-text-link);
 
     --dark-accent-success: #34D399; /* Green */
@@ -824,12 +850,18 @@
     --dark-accent-danger-bg: rgba(248, 113, 113, 0.1);
     --dark-accent-danger-border: rgba(248, 113, 113, 0.3);
     --dark-accent-danger-text: #FDD8D8;
+    
+    /* Error for alerts (using danger for consistency) */
+    --light-accent-error-bg: var(--light-accent-danger-bg);
+    --dark-accent-error-bg: var(--dark-accent-danger-bg);
+
 
     --dark-accent-info-bg: rgba(54, 163, 255, 0.15); /* For icon wrappers */
     --dark-accent-info-icon: var(--dark-accent-primary);
 
     /* Sizing & Spacing */
     --space-0_5: 0.125rem; --space-1: 0.25rem; --space-1_5: 0.375rem; --space-2: 0.5rem;
+    --space-2_5: 0.625rem;
     --space-3: 0.75rem; --space-4: 1rem; --space-6: 1.5rem; --space-8: 2rem;
     --space-10: 2.5rem; --space-12: 3rem;
 
@@ -894,31 +926,31 @@
 .app-layout { display: flex; height: 100vh; }
 .main-content-wrapper { flex: 1 1 0%; display: flex; flex-direction: column; overflow: hidden; }
 .main-area {
-    flex: 1 1 0%; /* Keeps its ability to be the main scrollable area */
-    display: flex; /* ADD this to make it a flex container */
-    flex-direction: column; /* ADD this to stack its children vertically */
+    flex: 1 1 0%; 
+    display: flex; 
+    flex-direction: column; 
     overflow-x: hidden;
-    overflow-y: auto; /* Remains the primary scrollbar if content overflows */
+    overflow-y: auto; 
     padding: var(--space-6);
-    padding-top: calc(60px + var(--space-4));
+    padding-top: calc(60px + var(--space-4)); /* 60px header height + padding */
 }
 .container {
     margin-left: auto;
     margin-right: auto;
     max-width: 1280px;
     padding: 0 var(--space-4);
-    display: flex; /* ADD this */
-    flex-direction: column; /* ADD this */
-    flex-grow: 1; /* ADD this - make the container fill the main-area's flex space */
-    width: 100%; /* Ensure it takes full width */
+    display: flex; 
+    flex-direction: column; 
+    flex-grow: 1; 
+    width: 100%; 
 }
 .workspace-section { margin-bottom: var(--space-12); }
 .template-section {
     margin-top: var(--space-12);
-    display: flex; /* ADD this */
-    flex-direction: column; /* ADD this */
-    flex-grow: 1; /* ADD this - THIS IS THE KEY CHANGE for this section */
-    min-height: 0; /* ADD this - Important for flex children that might scroll */
+    display: flex; 
+    flex-direction: column; 
+    flex-grow: 1; 
+    min-height: 0; 
 }
 
 /* Titles & Descriptions */
@@ -938,112 +970,154 @@
     font-size: 0.95rem;
     color: var(--light-text-tertiary);
     margin-bottom: var(--space-6);
-    max-width: 70ch; /* Improve readability */
+    max-width: 70ch; 
 }
 :global(body.dark) .section-description { color: var(--dark-text-tertiary); }
 
 /* SIDEBAR */
-.sidebar {
-    position: fixed; top: 0; left: 0; height: 100%; width: 16rem;
-    box-shadow: var(--shadow-lg); z-index: 50;
+#sidebar { /* Using ID selector to match HTML */
+    /* Tailwind classes mapped: fixed top-0 left-0 h-full w-64 shadow-lg z-50 flex flex-col justify-between p-4 border-r */
+    position: fixed; top: 0; left: 0;
+    height: 100%; width: 16rem; /* w-64 */
+    box-shadow: var(--shadow-lg);
+    z-index: 50;
     display: flex; flex-direction: column; justify-content: space-between;
-    padding: var(--space-6) var(--space-4); /* More vertical padding */
-    border-right: 1px solid var(--light-border-primary);
-    background-color: var(--light-bg-content);
-    transition: background-color var(--transition-duration), border-color var(--transition-duration);
+    padding: var(--space-4);
+    border-right-width: 1px; border-style: solid;
+    /* Light mode from HTML: bg-white border-gray-200 */
+    background-color: var(--light-bg-content); 
+    border-color: var(--light-border-primary);
+    transition: background-color var(--transition-duration) var(--transition-timing), border-color var(--transition-duration) var(--transition-timing);
 }
-:global(body.dark) .sidebar {
-    background-color: var(--dark-bg-content);
+/* Dark mode from HTML: dark:bg-zinc-800 dark:border-zinc-700 */
+:global(body.dark) #sidebar {
+    background-color: var(--dark-bg-content); 
     border-color: var(--dark-border-primary);
     box-shadow: var(--dark-shadow-lg);
 }
-.sidebar-header {
-    display: flex; align-items: center; gap: var(--space-3);
-    margin-bottom: var(--space-8); padding-bottom: var(--space-4);
-    border-bottom: 1px solid var(--light-border-primary);
+/* Sidebar Header (div with logo and title) */
+/* Tailwind: flex items-center gap-2 mb-8 pb-4 border-b */
+#sidebar > div > .flex.items-center.gap-2 {
+    display: flex; align-items: center;
+    gap: var(--space-2);
+    margin-bottom: var(--space-8);
+    padding-bottom: var(--space-4);
+    border-bottom-width: 1px; border-style: solid;
+    /* Light mode: border-gray-200 */
+    border-color: var(--light-border-primary);
 }
-:global(body.dark) .sidebar-header { border-color: var(--dark-border-primary); }
-.sidebar-logo-img { width: 2.25rem; height: 2.25rem; }
-.sidebar-title {
-    font-size: 1.375rem; font-weight: 700;
+/* Dark mode: dark:border-zinc-700 */
+:global(body.dark) #sidebar > div > .flex.items-center.gap-2 {
+    border-color: var(--dark-border-primary);
+}
+/* Sidebar Logo Img */
+/* Tailwind: w-8 h-8 */
+#sidebar img[alt="Microtask Logo"] { width: 2rem; height: 2rem; }
+/* Sidebar Title H1 */
+/* Tailwind: text-xl font-bold */
+#sidebar h1 {
+    font-size: 1.25rem; line-height: 1.75rem; /* text-xl */
+    font-weight: 700; /* font-bold */
+    /* Light mode: text-gray-800 */
     color: var(--light-text-primary);
 }
-:global(body.dark) .sidebar-title { color: var(--dark-text-primary); }
-.sidebar-nav { display: flex; flex-direction: column; gap: var(--space-1_5); } /* Slightly tighter gap */
-.nav-link {
-    display: flex; align-items: center; gap: var(--space-3);
-    padding: var(--space-2_5) var(--space-3); /* Slightly more padding */
+/* Dark mode: dark:text-zinc-100 */
+:global(body.dark) #sidebar h1 { color: var(--dark-text-primary); }
+
+/* Sidebar Nav */
+/* Tailwind: flex flex-col gap-2 */
+#sidebar nav { display: flex; flex-direction: column; gap: var(--space-2); }
+/* Nav Link (<a> tags) */
+/* Tailwind: flex items-center gap-3 px-3 py-2 rounded-md font-semibold transition-colors duration-150 */
+.nav-link { /* Added this class to <a> tags in HTML */
+    display: flex; align-items: center;
+    gap: var(--space-3); 
+    padding: var(--space-2) var(--space-3); 
     border-radius: var(--rounded-md);
-    font-weight: 500; /* Medium weight for nav links */
+    font-weight: 600; /* font-semibold */
     transition: background-color var(--transition-duration), color var(--transition-duration);
-    text-decoration: none; color: var(--light-text-secondary);
-    letter-spacing: 0.01em;
+    text-decoration: none;
+    /* Default text color based on mode, overridden by active/hover */
+    color: var(--light-text-secondary); /* Default for light */
 }
-.nav-link:hover { background-color: var(--light-bg-hover); color: var(--light-text-primary); }
+:global(body.dark) .nav-link {
+    color: var(--dark-text-secondary); /* Default for dark */
+}
+/* Nav Link Hover */
+/* Tailwind: hover:bg-gray-100 (light), hover:bg-zinc-700 (dark) */
+.nav-link:hover {
+    background-color: var(--light-bg-hover);
+}
+:global(body.dark) .nav-link:hover {
+    background-color: var(--dark-bg-hover);
+}
+/* Nav Link Active */
+/* Tailwind: class:bg-blue-600={!isDarkMode} class:bg-blue-800={isDarkMode} class:text-white={true} */
 .nav-link.active {
-    background-color: var(--light-accent-primary);
-    color: var(--light-text-on-accent);
-    font-weight: 600; /* Bolder active link */
+    background-color: var(--light-accent-primary-active); /* bg-blue-600 */
+    color: var(--light-text-on-accent); /* text-white */
 }
+:global(body.dark) .nav-link.active {
+    background-color: var(--dark-accent-primary-active); /* bg-blue-800 */
+    color: var(--dark-text-on-accent); /* text-white */
+}
+/* Nav Link Icons */
+/* Tailwind: w-5 h-5 */
 .nav-link .nav-link-icon, .nav-link .nav-link-icon-stroked {
     width: 1.25rem; height: 1.25rem;
-    transition: fill var(--transition-duration), stroke var(--transition-duration);
+    /* Color is handled by currentColor of parent <a>, or overridden for active */
 }
-.nav-link .nav-link-icon { fill: var(--light-text-tertiary); }
-.nav-link:hover .nav-link-icon { fill: var(--light-text-secondary); }
+/* Ensure active link icons are white, filled or stroked */
 .nav-link.active .nav-link-icon { fill: var(--light-text-on-accent); }
-.nav-link .nav-link-icon-stroked { stroke: var(--light-text-tertiary); fill: none; }
-.nav-link:hover .nav-link-icon-stroked { stroke: var(--light-text-secondary); }
-.nav-link.active .nav-link-icon-stroked { stroke: var(--light-text-on-accent); }
+.nav-link.active .nav-link-icon-stroked { stroke: var(--light-text-on-accent); fill: none; }
 
-:global(body.dark) .nav-link { color: var(--dark-text-secondary); }
-:global(body.dark) .nav-link:hover { background-color: var(--dark-bg-hover); color: var(--dark-text-primary); }
-:global(body.dark) .nav-link.active {
-    background-color: var(--dark-accent-primary);
-    color: var(--dark-text-on-accent);
-}
-:global(body.dark) .nav-link .nav-link-icon { fill: var(--dark-text-tertiary); }
-:global(body.dark) .nav-link:hover .nav-link-icon { fill: var(--dark-text-secondary); }
-:global(body.dark) .nav-link.active .nav-link-icon { fill: var(--dark-text-on-accent); }
-:global(body.dark) .nav-link .nav-link-icon-stroked { stroke: var(--dark-text-tertiary); }
-:global(body.dark) .nav-link:hover .nav-link-icon-stroked { stroke: var(--dark-text-secondary); }
-:global(body.dark) .nav-link.active .nav-link-icon-stroked { stroke: var(--dark-text-on-accent); }
 
-.logout-button {
-    display: flex; align-items: center; gap: var(--space-3);
-    padding: var(--space-2_5) var(--space-3); border-radius: var(--rounded-md);
-    font-weight: 500; width: 100%; margin-top: auto;
+/* Logout Button */
+/* Tailwind: flex items-center gap-3 px-3 py-2 rounded-md font-semibold w-full mt-auto transition-colors duration-150 */
+.logout-button { /* Added this class to button in HTML */
+    display: flex; align-items: center;
+    gap: var(--space-3); 
+    padding: var(--space-2) var(--space-3); 
+    border-radius: var(--rounded-md);
+    font-weight: 600; /* font-semibold */
+    width: 100%; /* w-full */
+    margin-top: auto; /* mt-auto */
     transition: background-color var(--transition-duration), color var(--transition-duration);
     background-color: transparent; border: none; cursor: pointer; text-align: left;
+     /* Light: text-gray-700 */
     color: var(--light-text-secondary);
 }
-.logout-button:hover { background-color: var(--light-bg-hover); color: var(--light-text-primary); }
-.logout-button .logout-button-icon { width: 1.25rem; height: 1.25rem; stroke: var(--light-text-tertiary); }
-.logout-button:hover .logout-button-icon { stroke: var(--light-text-secondary); }
-:global(body.dark) .logout-button { color: var(--dark-text-secondary); }
-:global(body.dark) .logout-button:hover { background-color: var(--dark-bg-hover); color: var(--dark-text-primary); }
-:global(body.dark) .logout-button .logout-button-icon { stroke: var(--dark-text-tertiary); }
-:global(body.dark) .logout-button:hover .logout-button-icon { stroke: var(--dark-text-secondary); }
-.sidebar-overlay {
-    position: fixed; top: 0; right: 0; bottom: 0; left: 0;
-    background-color: var(--light-bg-backdrop); opacity: 1; /* backdrop-filter for blur if desired */
-    z-index: 40;
+/* Logout Button Hover */
+/* Light: hover:bg-gray-100 */
+.logout-button:hover { background-color: var(--light-bg-hover); }
+/* Logout Button Icon */
+/* Tailwind: w-5 h-5 */
+.logout-button .logout-button-icon {
+    width: 1.25rem; height: 1.25rem;
+    stroke: currentColor; /* Inherits color from button's text color */
 }
-:global(body.dark) .sidebar-overlay { background-color: var(--dark-bg-backdrop); }
-@media (min-width: 768px) {
-    /* .top-header .menu-btn { display: none; }  <-- Ensure this is commented or gone */
+/* Dark mode Logout Button */
+/* Dark: text-zinc-300, hover:bg-zinc-700 */
+:global(body.dark) .logout-button {
+    color: var(--dark-text-secondary);
 }
+:global(body.dark) .logout-button:hover {
+    background-color: var(--dark-bg-hover);
+}
+
 
 /* HEADER */
 .top-header {
     position: fixed; top: 0; left: 0; right: 0; width: 100%;
     display: flex; align-items: center; justify-content: space-between;
-    padding: 0 var(--space-4); height: 60px; z-index: 30;
-    box-shadow: var(--shadow-md); /* Softer shadow */
+    padding: 0 var(--space-4); height: 60px; z-index: 30; /* z-index must be less than sidebar */
+    box-shadow: var(--shadow-md);
     transition: background-color var(--transition-duration), border-color var(--transition-duration);
+    /* Light from HTML: bg-white border-gray-200 */
     background-color: var(--light-bg-content);
     border-bottom: 1px solid var(--light-border-primary);
 }
+/* Dark from HTML: dark:bg-zinc-800 dark:border-zinc-700 */
 :global(body.dark) .top-header {
     background-color: var(--dark-bg-content);
     border-bottom-color: var(--dark-border-primary);
@@ -1054,64 +1128,77 @@
     background: none; border: none; cursor: pointer; padding: var(--space-2);
     border-radius: var(--rounded-md); transition: background-color var(--transition-duration);
     display: flex; align-items: center; justify-content: center;
+    color: var(--light-text-secondary); /* For SVG stroke */
 }
 .top-header .menu-btn:hover { background-color: var(--light-bg-hover); }
+:global(body.dark) .top-header .menu-btn { color: var(--dark-text-secondary); }
 :global(body.dark) .top-header .menu-btn:hover { background-color: var(--dark-bg-hover); }
-.top-header .menu-btn svg { width: 1.5rem; height: 1.5rem; display: block; stroke: var(--light-text-secondary); }
-:global(body.dark) .top-header .menu-btn svg { stroke: var(--dark-text-secondary); }
+.top-header .menu-btn svg { width: 1.5rem; height: 1.5rem; display: block; stroke: currentColor; }
 
 
 .top-header .logo { display: none; align-items: center; gap: var(--space-2); font-weight: 600; font-size: 1.25rem; text-decoration: none; }
-@media (min-width: 768px) { .top-header .logo { display: flex; } }
-.top-header .logo img { height: 2.25rem; width: auto; }
+@media (min-width: 768px) { .top-header .logo { display: flex; } } /* Only show logo on md+ */
+.top-header .logo img { height: 2rem; width: auto; } /* h-8 (from HTML) */
+/* Light from HTML: text-gray-800 */
 .top-header .logo span { color: var(--light-text-primary); }
+/* Dark from HTML: dark:text-zinc-100 */
 :global(body.dark) .top-header .logo span { color: var(--dark-text-primary); }
-.header-page-title {
-    font-size: 1.375rem; font-weight: 600;
-    margin-left: var(--space-2); color: var(--light-text-primary);
-}
-:global(body.dark) .header-page-title { color: var(--dark-text-primary); }
-@media (min-width: 768px) { .header-page-title { margin-left: 0; } }
 
-.header-icons { display: flex; align-items: center; gap: var(--space-1_5); } /* Slightly more gap */
-.header-icons button {
+.header-icons { display: flex; align-items: center; gap: var(--space-1_5); }
+.header-icons button { /* Applies to bell, help, profile buttons */
     background: none; border: none; cursor: pointer; padding: var(--space-2);
     line-height: 0; display: flex; align-items: center; justify-content: center;
-    border-radius: var(--rounded-md); width: 40px; height: 40px; /* Slightly larger touch target */
+    border-radius: var(--rounded-md); width: 40px; height: 40px;
     transition: background-color var(--transition-duration);
+    color: var(--light-text-secondary); /* For SVGs */
 }
 .header-icons button:hover { background-color: var(--light-bg-hover); }
+:global(body.dark) .header-icons button { color: var(--dark-text-secondary); }
 :global(body.dark) .header-icons button:hover { background-color: var(--dark-bg-hover); }
-.header-icons svg { height: 1.375rem; width: 1.375rem; opacity: 1; fill: var(--light-text-secondary); }
-:global(body.dark) .header-icons svg { fill: var(--dark-text-secondary); }
+.header-icons svg { height: 1.25rem; width: 1.25rem; fill: currentColor; } /* w-5 h-5 */
 
 .relative { position: relative; }
+
+/* UPDATED Dropdown Window styles to match example's hide/show logic */
+.hidden-dropdown { display: none !important; }
+
 .dropdown-window {
-    position: absolute; right: 0; top: calc(100% + 10px); /* More space */
+    position: absolute; right: 0; top: calc(100% + 10px);
     border-radius: var(--rounded-lg); box-shadow: var(--shadow-lg);
-    padding: var(--space-4); width: 280px; z-index: 35;
+    padding: var(--space-4); width: 280px; z-index: 35; /* z-index > header, < sidebar */
+    
+    /* Animation properties */
     opacity: 0; transform: translateY(-5px) scale(0.98);
-    transition: opacity var(--transition-duration), transform var(--transition-duration), visibility 0s linear var(--transition-duration);
+    transition: opacity var(--transition-duration) var(--transition-timing), 
+                transform var(--transition-duration) var(--transition-timing),
+                visibility 0s linear var(--transition-duration); /* Delay visibility change */
     pointer-events: none; visibility: hidden;
+    
+    /* Light from HTML: bg-white border-gray-200 text-gray-700 */
     background-color: var(--light-bg-content);
     border: 1px solid var(--light-border-primary);
     color: var(--light-text-secondary);
 }
-.dropdown-window:not(.dropdown-window-hidden) { opacity: 1; transform: translateY(0) scale(1); pointer-events: auto; visibility: visible; transition-delay: 0s;}
-.dropdown-window-hidden { display: none !important; }
+/* Show state: when hidden-dropdown class is NOT present */
+.dropdown-window:not(.hidden-dropdown) {
+    opacity: 1; transform: translateY(0) scale(1);
+    pointer-events: auto; visibility: visible;
+    transition-delay: 0s; /* Apply visibility change immediately */
+}
+/* Dark from HTML: dark:bg-zinc-700 dark:border-zinc-600 dark:text-zinc-300 */
 :global(body.dark) .dropdown-window {
-    background-color: var(--dark-bg-content);
+    background-color: var(--dark-bg-content); /* Matching other dark content */
     border-color: var(--dark-border-primary);
     color: var(--dark-text-secondary);
     box-shadow: var(--dark-shadow-lg);
 }
 .dropdown-window h3 { font-weight: 600; margin-bottom: var(--space-3); font-size: 0.95rem; color: var(--light-text-primary); }
 :global(body.dark) .dropdown-window h3 { color: var(--dark-text-primary); }
-.dropdown-window p, .dropdown-window li { font-size: 0.875rem; color: var(--light-text-secondary); }
-:global(body.dark) .dropdown-window p, :global(body.dark) .dropdown-window li { color: var(--dark-text-secondary); }
+.dropdown-window p, .dropdown-window li { font-size: 0.875rem; } /* color inherited */
 .dropdown-list { list-style: disc; list-style-position: inside; margin-left: var(--space-1_5); }
 .dropdown-list li { margin-bottom: var(--space-1); }
-.dropdown-support-link {
+
+.dropdown-support-link { /* For "Visit Support" link */
     font-size: 0.875rem; color: var(--light-text-link);
     text-decoration: none; margin-top: var(--space-2); display: block;
 }
@@ -1119,24 +1206,41 @@
 :global(body.dark) .dropdown-support-link { color: var(--dark-text-link); }
 
 .profile-welcome-msg { font-size: 0.875rem; margin-bottom: var(--space-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.dropdown-link, .dropdown-button-danger {
+.dropdown-button-danger { /* For Logout button in profile dropdown */
     display: block; font-size: 0.875rem; font-weight: 500;
     padding: var(--space-2_5) var(--space-3);
     border-radius: var(--rounded-md); width: 100%; text-align: left;
-    margin-bottom: var(--space-1_5);
     transition: background-color var(--transition-duration), color var(--transition-duration);
-    text-decoration: none; border: none; cursor: pointer;
+    border: none; cursor: pointer;
+    /* Light from HTML: bg-red-100 hover:bg-red-200 text-red-700 */
+    background-color: var(--light-accent-danger-bg); 
+    color: var(--light-accent-danger-text);
 }
-.dropdown-link { background-color: var(--light-bg-hover); color: var(--light-text-secondary); }
-.dropdown-link:hover { background-color: var(--light-border-primary); color: var(--light-text-primary); }
-:global(body.dark) .dropdown-link { background-color: var(--dark-bg-hover); color: var(--dark-text-secondary); }
-:global(body.dark) .dropdown-link:hover { background-color: var(--dark-border-primary); color: var(--dark-text-primary); }
+.dropdown-button-danger:hover {
+    background-color: var(--light-accent-danger); /* Closer to hover:bg-red-200 but using main danger color for more pop */
+    color: var(--light-text-on-accent);
+}
+/* Dark from HTML: dark:bg-red-700 hover:bg-red-600 text-zinc-300 */
+:global(body.dark) .dropdown-button-danger {
+    background-color: var(--dark-accent-danger); /* dark:bg-red-700 implies a darker red */
+    color: var(--dark-text-on-accent); /* dark:text-zinc-300 is light, so on-accent */
+}
+:global(body.dark) .dropdown-button-danger:hover {
+    background-color: var(--dark-accent-danger-hover); /* dark:hover:bg-red-600 */
+}
+/* Dark Mode Toggle Button in Header */
+/* Light from HTML: hover:bg-gray-100 text-gray-700 */
+#darkModeToggle {
+    margin-left: var(--space-2);
+    color: var(--light-text-secondary);
+}
+#darkModeToggle:hover { background-color: var(--light-bg-hover); }
+/* Dark from HTML: dark:hover:bg-zinc-700 dark:text-zinc-300 */
+:global(body.dark) #darkModeToggle {
+    color: var(--dark-text-secondary);
+}
+:global(body.dark) #darkModeToggle:hover { background-color: var(--dark-bg-hover); }
 
-.dropdown-button-danger { background-color: var(--light-accent-danger-bg); color: var(--light-accent-danger-text); }
-.dropdown-button-danger:hover { background-color: var(--light-accent-danger); color: var(--light-text-on-accent); }
-:global(body.dark) .dropdown-button-danger { background-color: var(--dark-accent-danger-bg); color: var(--dark-accent-danger-text); }
-:global(body.dark) .dropdown-button-danger:hover { background-color: var(--dark-accent-danger); color: var(--dark-text-on-accent); }
-#darkModeToggle { margin-left: var(--space-2); }
 
 /* ALERTS */
 .alert {
@@ -1182,9 +1286,7 @@
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
     gap: var(--space-6);
-    flex-grow: 1; /* ADD this - make the grid expand within the template-section */
-    /* If you want the grid itself to scroll if it has too many items and template-section has a fixed height
-       you might add overflow-y: auto; here. But for now, letting main-area scroll is fine. */
+    flex-grow: 1; 
 }
 
 .board-card, .template-card {
@@ -1196,9 +1298,6 @@
     position: relative;
     display: flex;
     flex-direction: column;
-    /* flex-basis: auto; /* Or a specific min-height if you want all cards to be same height initially */
-    /* You might want to add a min-height to template-card if the grid is too sparse */
-    /* min-height: 350px; /* Example: Adjust as needed */
 }
 .board-card:hover, .template-card:hover { box-shadow: var(--shadow-lg); transform: translateY(-3px); }
 :global(body.dark) .board-card, :global(body.dark) .template-card {
@@ -1218,7 +1317,7 @@
 .board-card-meta { font-size: 0.8rem; color: var(--light-text-tertiary); }
 :global(body.dark) .board-card-meta { color: var(--dark-text-tertiary); }
 .board-card-delete-btn {
-    position: absolute; top: var(--space-3); right: var(--space-3); /* Adjusted padding */
+    position: absolute; top: var(--space-3); right: var(--space-3);
     padding: var(--space-1_5); border-radius: var(--rounded-md);
     transition: color var(--transition-duration), background-color var(--transition-duration);
     color: var(--light-text-tertiary);
@@ -1237,6 +1336,7 @@
 .board-card-delete-btn .icon-sm, .board-card-delete-btn .spinner {
     width: 1rem; height: 1rem; display: inline-block; vertical-align: middle;
 }
+.spinner { animation: spin 1s linear infinite; } /* Add spinner animation if not already present */
 
 .add-workspace-card {
     display: flex; flex-direction: column; align-items: center; justify-content: center;
@@ -1290,11 +1390,11 @@
 
 .template-card-header { display: flex; align-items: center; margin-bottom: var(--space-4); }
 .template-card-icon-wrapper {
-    padding: var(--space-2_5); /* Slightly larger padding */
+    padding: var(--space-2_5); 
     background-color: var(--light-accent-info-bg);
     border-radius: var(--rounded-full); margin-right: var(--space-3);
     display: inline-flex; align-items: center; justify-content: center;
-    width: 44px; height: 44px; /* Fixed size */
+    width: 44px; height: 44px; 
 }
 .template-card-icon-wrapper svg { width: 1.5rem; height: 1.5rem; color: var(--light-accent-info-icon); fill: currentColor; }
 :global(body.dark) .template-card-icon-wrapper { background-color: var(--dark-accent-info-bg); }
@@ -1336,10 +1436,10 @@
 :global(body.dark) .modal-overlay { background-color: var(--dark-bg-backdrop); }
 .modal-content {
     background-color: var(--light-bg-content);
-    padding: var(--space-8); border-radius: var(--rounded-lg); /* More padding */
-    box-shadow: var(--shadow-xl); width: 100%; max-width: 32rem; /* Slightly wider for some modals */
+    padding: var(--space-8); border-radius: var(--rounded-lg); 
+    box-shadow: var(--shadow-xl); width: 100%; max-width: 32rem; 
     display: flex; flex-direction: column;
-    max-height: 90vh; /* ensure modal fits in viewport */
+    max-height: 90vh; 
 }
 :global(body.dark) .modal-content {
     background-color: var(--dark-bg-content);
@@ -1357,7 +1457,7 @@
     color: var(--light-text-tertiary);
     transition: color var(--transition-duration);
     background: none; border: none; cursor: pointer; padding: 0; line-height: 1;
-    font-size: 1.75rem; /* Larger close icon */
+    font-size: 1.75rem; 
 }
 .modal-close-button:hover { color: var(--light-text-secondary); }
 :global(body.dark) .modal-close-button { color: var(--dark-text-tertiary); }
@@ -1371,7 +1471,7 @@
 .modal-label .required-asterisk { color: var(--light-accent-danger); margin-left: var(--space-0_5); }
 :global(body.dark) .modal-label { color: var(--dark-text-secondary); }
 .modal-input, .modal-textarea {
-    width: 100%; padding: var(--space-2_5) var(--space-3); /* Consistent padding */
+    width: 100%; padding: var(--space-2_5) var(--space-3); 
     border: 1px solid var(--light-border-secondary);
     border-radius: var(--rounded-md); box-shadow: var(--shadow-sm);
     background-color: var(--light-bg-input); color: var(--light-text-primary);
@@ -1469,7 +1569,7 @@
 }
 
 /* Template Usage Modal Specifics */
-.modal-content-large { max-width: 40rem; } /* Wider for template modal */
+.modal-content-large { max-width: 40rem; } 
 .modal-form-flex-grow { display: flex; flex-direction: column; flex-grow: 1; overflow: hidden; }
 .modal-form-scrollable { overflow-y: auto; padding-right: var(--space-2); flex-grow: 1; margin-bottom: var(--space-4); }
 .template-modal-goal { font-size: 0.95rem; color: var(--light-text-secondary); margin-bottom: var(--space-4); }
@@ -1510,122 +1610,4 @@
 .icon-md { width: 1.25rem; height: 1.25rem; fill: currentColor; }
 .icon-lg { width: 2rem; height: 2rem; fill: currentColor; }
 .icon-xl { width: 4rem; height: 4rem; fill: currentColor; }
-.sidebar {
-    position: fixed; top: 0; left: 0;
-    height: 100%; width: 16rem; /* w-64 */
-    box-shadow: var(--shadow-lg);
-    z-index: 50;
-    display: flex; flex-direction: column; justify-content: space-between;
-    padding: var(--space-4);
-    border-right-width: 1px; border-style: solid;
-    background-color: var(--light-bg-content); /* Was --light-bg-secondary */
-    border-color: var(--light-border-primary);
-    transition: background-color var(--transition-duration) var(--transition-timing), border-color var(--transition-duration) var(--transition-timing);
-}
-:global(body.dark) .sidebar {
-    background-color: var(--dark-bg-content); /* Was --dark-bg-secondary */
-    border-color: var(--dark-border-primary);
-    box-shadow: var(--dark-shadow-lg); /* Added for dark mode consistency */
-}
-.sidebar-header {
-    display: flex; align-items: center;
-    gap: var(--space-2);
-    margin-bottom: var(--space-8);
-    padding-bottom: var(--space-4);
-    border-bottom-width: 1px; border-style: solid;
-    border-color: var(--light-border-primary);
-}
-:global(body.dark) .sidebar-header {
-    border-color: var(--dark-border-primary);
-}
-.sidebar-logo-img { width: 2rem; height: 2rem; } /* w-8 h-8 */
-.sidebar-title {
-    font-size: 1.25rem; line-height: 1.75rem; /* text-xl */
-    font-weight: 700; /* font-bold */
-    color: var(--light-text-primary);
-}
-:global(body.dark) .sidebar-title { color: var(--dark-text-primary); }
-.sidebar-nav { display: flex; flex-direction: column; gap: var(--space-2); }
-.nav-link {
-    display: flex; align-items: center;
-    gap: var(--space-3); /* gap-3 */
-    padding: var(--space-2) var(--space-3); /* px-3 py-2 */
-    border-radius: var(--rounded-md);
-    font-weight: 600; /* font-semibold */
-    transition: background-color var(--transition-duration) var(--transition-timing), color var(--transition-duration) var(--transition-timing);
-    text-decoration: none;
-    color: var(--light-text-secondary);
-}
-/* Specific hover and active states from home page example */
-.nav-link:hover {
-    background-color: var(--light-bg-hover); /* Matches hover:bg-gray-100 */
-    /* color: var(--light-text-primary); Implicit from theme, but can be explicit */
-}
-.nav-link.active { /* This logic is complex with Tailwind, map to simple active state */
-    background-color: var(--light-accent-primary); /* Matches bg-blue-600 */
-    color: var(--light-text-on-accent); /* Matches text-white */
-}
-:global(body.dark) .nav-link {
-    color: var(--dark-text-secondary); /* Matches text-zinc-300 */
-}
-:global(body.dark) .nav-link:hover {
-    background-color: var(--dark-bg-hover); /* Matches hover:bg-zinc-700 */
-}
-:global(body.dark) .nav-link.active {
-    background-color: var(--dark-accent-primary-active); /* Matches bg-blue-800 in dark mode example */
-    color: var(--dark-text-on-accent); /* Matches text-white */
-}
-
-.nav-link .nav-link-icon { width: 1.25rem; height: 1.25rem; fill: currentColor; } /* w-5 h-5 */
-.nav-link .nav-link-icon-stroked { width: 1.25rem; height: 1.25rem; stroke: currentColor; fill: none; }
-
-/* Ensure active link icons are white */
-.nav-link.active .nav-link-icon,
-.nav-link.active .nav-link-icon-stroked {
-    fill: var(--light-text-on-accent); /* For filled icons */
-    stroke: var(--light-text-on-accent); /* For stroked icons */
-}
-/* Default icon colors (non-active) */
-:global(body:not(.dark)) .nav-link:not(.active) .nav-link-icon { fill: var(--light-text-secondary); }
-:global(body:not(.dark)) .nav-link:not(.active) .nav-link-icon-stroked { stroke: var(--light-text-secondary); }
-:global(body.dark) .nav-link:not(.active) .nav-link-icon { fill: var(--dark-text-secondary); }
-:global(body.dark) .nav-link:not(.active) .nav-link-icon-stroked { stroke: var(--dark-text-secondary); }
-
-
-.logout-button {
-    display: flex; align-items: center;
-    gap: var(--space-3); /* gap-3 */
-    padding: var(--space-2) var(--space-3); /* px-3 py-2 */
-    border-radius: var(--rounded-md);
-    font-weight: 600; /* font-semibold */
-    width: 100%; /* w-full */
-    margin-top: auto; /* mt-auto */
-    transition: background-color var(--transition-duration) var(--transition-timing), color var(--transition-duration) var(--transition-timing);
-    background-color: transparent; border: none; cursor: pointer; text-align: left;
-    color: var(--light-text-secondary);
-}
-.logout-button:hover {
-    background-color: var(--light-bg-hover); /* Matches hover:bg-gray-100 */
-}
-.logout-button .logout-button-icon {
-    width: 1.25rem; height: 1.25rem; /* w-5 h-5 */
-    stroke: var(--light-text-secondary); /* Matches text-gray-700 for stroke */
-}
-:global(body.dark) .logout-button {
-    color: var(--dark-text-secondary); /* Matches text-zinc-300 */
-}
-:global(body.dark) .logout-button:hover {
-    background-color: var(--dark-bg-hover); /* Matches hover:bg-zinc-700 */
-}
-:global(body.dark) .logout-button .logout-button-icon {
-    stroke: var(--dark-text-secondary); /* Matches text-zinc-300 for stroke */
-}
-
-.sidebar-overlay {
-    position: fixed; top: 0; right: 0; bottom: 0; left: 0;
-    background-color: var(--light-bg-backdrop); opacity: 1; /* backdrop-filter for blur if desired */
-    z-index: 40;
-}
-:global(body.dark) .sidebar-overlay { background-color: var(--dark-bg-backdrop); }
-@media (min-width: 768px) { .sidebar-overlay { display: none; } } /* md:hidden */
 </style>
