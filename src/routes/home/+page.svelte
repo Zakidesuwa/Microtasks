@@ -716,7 +716,6 @@
           <div id="profileWindow" class={`dropdown-window hidden ${isDarkMode ? 'bg-zinc-700 border-zinc-600 text-zinc-300' : 'bg-white border-gray-200 text-gray-700'}`}>
             <h3 class="font-semibold mb-2 text-sm">Profile</h3>
             <p class="text-xs mb-2 truncate">Welcome, {username || 'User'}!</p>
-            <a href="/settings" class={`block text-xs px-2 py-1.5 rounded w-full text-left mb-1 transition-colors duration-150 ${isDarkMode ? 'bg-zinc-600 hover:bg-zinc-500 text-zinc-300' : 'bg-gray-100 hover:bg-gray-200 text-gray-700'}`}>Settings</a>
             <button on:click={handleLogout} class={`text-xs px-2 py-1.5 rounded w-full text-left transition-colors duration-150 ${isDarkMode ? 'bg-red-700 hover:bg-red-600 text-zinc-300' : 'bg-red-100 hover:bg-red-200 text-red-700'}`}>Logout</button>
           </div>
         </div>
@@ -1287,5 +1286,7 @@
   :global(.dark .hover\:bg-zinc-500:hover) { background-color: #6b7280; } 
   :global(.dark .border-zinc-500) { border-color: #6b7280; }            
   :global(.dark .bg-blue-800) { background-color: #1d4ed8; }          
-  :global(.dark .text-blue-400) { color: #60a5fa; }                   
+  :global(.dark .text-blue-400) { color: #60a5fa; }     
+  
+  
 </style>

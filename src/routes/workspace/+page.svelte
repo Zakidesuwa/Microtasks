@@ -53,12 +53,12 @@
 	const topHeaderDropdownIds = ['notifWindow', 'helpWindow', 'profileWindow'];
 	function toggleHeaderWindow(id: string) {
 		const el = document.getElementById(id);
-		if (el) el.classList.toggle('hidden');
+		if (el) el.classList.toggle('dropdown-window-hidden');
 	}
 	function closeOtherHeaderWindows(currentId: string) {
 		topHeaderDropdownIds.forEach(id => {
 			if (id !== currentId) {
-				document.getElementById(id)?.classList.add('hidden');
+				document.getElementById(id)?.classList.add('dropdown-window-hidden');
 			}
 		});
 	}
@@ -132,7 +132,7 @@
 	let showTemplateUsageModal = false;
 	let selectedTemplateForUsage: Template | null = null;
 	let newWorkspaceNameFromTemplate = '';
-	let projectStartDate: string = '';
+	let projectStartDate: string = new Date().toISOString().split('T')[0];
 	let projectEndDate: string = '';
 	let projectNotes: string = '';
 	let stepSpecificInputs: Record<number, string> = {};
@@ -177,7 +177,6 @@
 		selectedTemplateForUsage = null;
 	}
 
-	// --- Reactive logic for form handling ---
 	$: {
 		if (form) {
 			formActionError = null;
@@ -212,7 +211,7 @@
 					templateFormActionError = form.templateForm.error;
 				} else if ('success' in form.templateForm) { 
 					templateFormSuccessMessage = form.templateForm.message; 
-                    const newBoardTitle = form.templateForm.newBoard.title; // Make sure this path is correct
+                    const newBoardTitle = form.templateForm.newBoard.title;
 					pageSuccessMessage = `Workspace "${newBoardTitle}" and AI tasks created! View tasks inside.`;
 					invalidateAll(); 
 					closeTemplateUsageModal();
@@ -235,17 +234,14 @@
 		}
 
 		if (browser) {
-			// Initialize isDarkMode based on localStorage or system preference
 			const savedTheme = localStorage.getItem('theme');
 			const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
 			isDarkMode = savedTheme === 'dark' || (!savedTheme && prefersDark);
-			// Apply .dark class to body based on initial state
 			if (isDarkMode) {
 				document.body.classList.add('dark');
 			} else {
 				document.body.classList.remove('dark');
 			}
-
 
 			const darkModeButton = document.getElementById('darkModeToggle');
 			if (darkModeButton) darkModeButton.addEventListener('click', toggleDarkMode);
@@ -276,7 +272,7 @@
 			let isClickInsideDropdownWindow = false;
 			topHeaderDropdownIds.forEach(windowId => {
 				const windowEl = document.getElementById(windowId);
-				if (windowEl && !windowEl.classList.contains('hidden') && windowEl.contains(target)) {
+				if (windowEl && !windowEl.classList.contains('dropdown-window-hidden') && windowEl.contains(target)) {
 					isClickInsideDropdownWindow = true;
 				}
 			});
@@ -298,8 +294,8 @@
 			modals.forEach(modal => {
 				const modalEl = document.getElementById(modal.modalId);
 				if (modal.condition && modalEl && !modalEl.contains(target as Node)) {
-					const overlayEl = modalEl.parentElement;
-					if (overlayEl && overlayEl === event.target) {
+					const overlayEl = modalEl.parentElement; // This should be the modal-overlay div
+                    if (overlayEl && overlayEl.classList.contains('modal-overlay') && overlayEl === event.target) {
 						modal.closeFn();
 					}
 				}
@@ -324,7 +320,6 @@
 			if(globalClickListener) document.removeEventListener('click', globalClickListener);
 			if(escKeyListener) document.removeEventListener('keydown', escKeyListener);
 			
-			// Ensure darkModeToggle listener is removed if it was added
 			const darkModeButton = document.getElementById('darkModeToggle');
 			if (darkModeButton) darkModeButton.removeEventListener('click', toggleDarkMode);
 		}
@@ -332,28 +327,27 @@
 
 </script>
 
-<div class={`flex h-screen font-sans ${isDarkMode ? 'dark bg-zinc-900 text-zinc-300' : 'bg-gray-100 text-gray-800'}`}>
-	{#if isSidebarOpen}
-		<aside
-			id="sidebar"
-			class={`fixed top-0 left-0 h-full w-64 shadow-lg z-50 flex flex-col justify-between p-4 border-r
-					${isDarkMode ? 'bg-zinc-800 border-zinc-700' : 'bg-white border-gray-200'}`}
-			transition:fly={{ x: -300, duration: 300, easing: quintOut }}
-		>
-			<div>
-				<div class="flex items-center gap-2 mb-8 pb-4 border-b ${isDarkMode ? 'border-zinc-700' : 'border-gray-200'}">
-					<img src="/logonamin.png" alt="Microtask Logo" class="w-8 h-8" />
-					<h1 class={`text-xl font-bold ${isDarkMode ? 'text-zinc-100' : 'text-gray-800'}`}>Microtask</h1>
-				</div>
-				<nav class="flex flex-col gap-2">
-					<a href="/home"
-						class={`flex items-center gap-3 px-3 py-2 rounded-md font-semibold transition-colors duration-150
-								${currentPath === '/home' || currentPath === '/' ? (isDarkMode ? 'bg-blue-700 text-white' : 'bg-blue-600 text-white') : (isDarkMode ? 'text-zinc-300 hover:bg-zinc-700' : 'text-gray-700 hover:bg-gray-100')}`}
-					>
-						<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-5 h-5" aria-hidden="true"><path d="M11.47 3.84a.75.75 0 011.06 0l8.69 8.69a.75.75 0 101.06-1.06l-8.689-8.69a2.25 2.25 0 00-3.182 0l-8.69 8.69a.75.75 0 001.061 1.06l8.69-8.69z" /><path d="M12 5.432l8.159 8.159c.03.03.06.058.091.086v6.198c0 1.035-.84 1.875-1.875 1.875H15a.75.75 0 01-.75-.75v-4.5a.75.75 0 00-.75-.75h-3a.75.75 0 00-.75.75V21a.75.75 0 01-.75.75H5.625a1.875 1.875 0 01-1.875-1.875v-6.198a2.29 2.29 0 00.091-.086L12 5.43z" /></svg>
-						<span>Home</span>
-					</a>
-					<a href="/dashboard" 
+<div class="app-layout">
+	 {#if isSidebarOpen}
+    <div
+      id="sidebar"
+      class={`fixed top-0 left-0 h-full w-64 shadow-lg z-50 flex flex-col justify-between p-4 border-r ${isDarkMode ? 'bg-zinc-800 border-zinc-700' : 'bg-white border-gray-200'}`}
+      transition:fly={{ x: -300, duration: 300, easing: quintOut }}
+    >
+      <div>
+        <div class="flex items-center gap-2 mb-8 pb-4 border-b ${isDarkMode ? 'border-zinc-700' : 'border-gray-200'}">
+          <img src="/logonamin.png" alt="Microtask Logo" class="w-8 h-8" />
+          <h1 class={`text-xl font-bold ${isDarkMode ? 'text-zinc-100' : 'text-gray-800'}`}>Microtask</h1>
+        </div>
+        <nav class="flex flex-col gap-2">
+          <a href="/home" class="flex items-center gap-3 px-3 py-2 rounded-md font-semibold transition-colors duration-150" class:bg-blue-600={!isDarkMode} class:bg-blue-800={isDarkMode} class:text-white={true} class:hover:bg-gray-100={!isDarkMode} class:hover:bg-zinc-700={isDarkMode}>
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-5 h-5" aria-hidden="true">
+              <path d="M11.47 3.84a.75.75 0 011.06 0l8.69 8.69a.75.75 0 101.06-1.06l-8.689-8.69a2.25 2.25 0 00-3.182 0l-8.69 8.69a.75.75 0 001.061 1.06l8.69-8.69z" />
+              <path d="M12 5.432l8.159 8.159c.03.03.06.058.091.086v6.198c0 1.035-.84 1.875-1.875 1.875H15a.75.75 0 01-.75-.75v-4.5a.75.75 0 00-.75-.75h-3a.75.75 0 00-.75.75V21a.75.75 0 01-.75.75H5.625a1.875 1.875 0 01-1.875-1.875v-6.198a2.29 2.29 0 00.091-.086L12 5.43z" />
+            </svg>
+            <span>Home</span>
+          </a>
+          <a href="/dashboard" 
              class="flex items-center gap-3 px-3 py-2 rounded-md font-semibold transition-colors duration-150"
              class:bg-blue-600={!isDarkMode && $page.url.pathname === '/dashboard'} 
              class:bg-blue-800={isDarkMode && $page.url.pathname === '/dashboard'} 
@@ -370,223 +364,184 @@
             </svg>
             <span>Dashboard</span>
           </a>
-					<a href="/tasks"
-						class={`flex items-center gap-3 px-3 py-2 rounded-md font-semibold transition-colors duration-150
-								${currentPath === '/tasks' ? (isDarkMode ? 'bg-blue-700 text-white' : 'bg-blue-600 text-white') : (isDarkMode ? 'text-zinc-300 hover:bg-zinc-700' : 'text-gray-700 hover:bg-gray-100')}`}
-					>
-						<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" class={`w-5 h-5 ${currentPath === '/tasks' ? 'stroke-white' : (isDarkMode ? 'stroke-zinc-300' : 'stroke-gray-700')}`}><path stroke-linecap="round" stroke-linejoin="round" d="M9 12h3.75M9 15h3.75M9 18h3.75m3 .75H18a2.25 2.25 0 0 0 2.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 0 0-1.123-.08m-5.801 0c-.065.21-.1.433-.1.664 0 .414.336.75.75.75h4.5a.75.75 0 0 0 .75-.75 2.25 2.25 0 0 0-.1-.664m-5.8 0A2.251 2.251 0 0 1 13.5 2.25H15c1.012 0 1.867.668 2.15 1.586m-5.8 0c-.376.023-.75.05-1.124.08C9.095 4.01 8.25 4.973 8.25 6.108V8.25m0 0H4.875c-.621 0-1.125.504-1.125 1.125v11.25c0 .621.504 1.125 1.125 1.125h9.75c.621 0 1.125-.504 1.125-1.125V9.375c0-.621-.504-1.125-1.125-1.125H8.25ZM6.75 12h.008v.008H6.75V12Zm0 3h.008v.008H6.75V15Zm0 3h.008v.008H6.75V18Z" /></svg>
-						<span>All Tasks</span>
-					</a>
-					<a href="/calendar"
-						class={`flex items-center gap-3 px-3 py-2 rounded-md font-semibold transition-colors duration-150
-								${currentPath === '/calendar' ? (isDarkMode ? 'bg-blue-700 text-white' : 'bg-blue-600 text-white') : (isDarkMode ? 'text-zinc-300 hover:bg-zinc-700' : 'text-gray-700 hover:bg-gray-100')}`}
-					>
-						<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-5 h-5" aria-hidden="true"><path fill-rule="evenodd" d="M6.75 2.25A.75.75 0 017.5 3v1.5h9V3A.75.75 0 0118 3v1.5h.75a3 3 0 013 3v11.25a3 3 0 01-3 3H5.25a3 3 0 01-3-3V7.5a3 3 0 013-3H6V3a.75.75 0 01.75-.75zM5.25 6.75c-.621 0-1.125.504-1.125 1.125V18a1.125 1.125 0 001.125 1.125h13.5A1.125 1.125 0 0019.875 18V7.875c0-.621-.504-1.125-1.125-1.125H5.25z" clip-rule="evenodd" /><path d="M10.5 9.75a.75.75 0 00-1.5 0v.01c0 .414.336.75.75.75H10.5v-.01a.75.75 0 000-1.5zM10.5 12.75a.75.75 0 00-1.5 0v.01c0 .414.336.75.75.75H10.5v-.01a.75.75 0 000-1.5zM10.5 15.75a.75.75 0 00-1.5 0v.01c0 .414.336.75.75.75H10.5v-.01a.75.75 0 000-1.5zM13.5 9.75a.75.75 0 00-1.5 0v.01c0 .414.336.75.75.75H13.5v-.01a.75.75 0 000-1.5zM13.5 12.75a.75.75 0 00-1.5 0v.01c0 .414.336.75.75.75H13.5v-.01a.75.75 0 000-1.5zM13.5 15.75a.75.75 0 00-1.5 0v.01c0 .414.336.75.75.75H13.5v-.01a.75.75 0 000-1.5zM16.5 9.75a.75.75 0 00-1.5 0v.01c0 .414.336.75.75.75H16.5v-.01a.75.75 0 000-1.5zM16.5 12.75a.75.75 0 00-1.5 0v.01c0 .414.336.75.75.75H16.5v-.01a.75.75 0 000-1.5zM16.5 15.75a.75.75 0 00-1.5 0v.01c0 .414.336.75.75.75H16.5v-.01a.75.75 0 000-1.5z"/></svg>
-						<span>Calendar</span>
-					</a>
-					<a href="/workspace"
-						class={`flex items-center gap-3 px-3 py-2 rounded-md font-semibold transition-colors duration-150
-								${currentPath === '/workspace' ? (isDarkMode ? 'bg-blue-700 text-white' : 'bg-blue-600 text-white') : (isDarkMode ? 'text-zinc-300 hover:bg-zinc-700' : 'text-gray-700 hover:bg-gray-100')}`}
-					>
-						<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" class={`w-5 h-5 ${currentPath === '/workspace' ? 'stroke-white' : (isDarkMode ? 'stroke-zinc-300' : 'stroke-gray-700')}`}><path stroke-linecap="round" stroke-linejoin="round" d="M20.25 14.15v4.098a2.25 2.25 0 0 1-2.25 2.25h-12a2.25 2.25 0 0 1-2.25-2.25V14.15M18 18.75h.75A2.25 2.25 0 0 0 21 16.5v-1.5a2.25 2.25 0 0 0-2.25-2.25h-15A2.25 2.25 0 0 0 1.5 15v1.5A2.25 2.25 0 0 0 3.75 18.75H4.5M12 12.75a3 3 0 0 0-3-3H5.25V7.5a3 3 0 0 1 3-3h7.5a3 3 0 0 1 3 3v2.25H15a3 3 0 0 0-3 3Z" /></svg>
-						<span>Workspace</span>
-					</a>
-					<a href="/ai-chat"
-						class={`flex items-center gap-3 px-3 py-2 rounded-md font-semibold transition-colors duration-150
-								${currentPath === '/ai-chat' ? (isDarkMode ? 'bg-blue-700 text-white' : 'bg-blue-600 text-white') : (isDarkMode ? 'text-zinc-300 hover:bg-zinc-700' : 'text-gray-700 hover:bg-gray-100')}`}
-					>
-						<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-5 h-5" aria-hidden="true"><path d="M12.001 2.504a2.34 2.34 0 00-2.335 2.335v.583c0 .582.212 1.13.582 1.556l.03.035-.03.034a2.34 2.34 0 00-2.917 3.916A3.287 3.287 0 004.08 14.25a3.287 3.287 0 003.287 3.287h8.266a3.287 3.287 0 003.287-3.287 3.287 3.287 0 00-1.253-2.583 2.34 2.34 0 00-2.917-3.916l-.03-.034.03-.035c.37-.425.582-.973.582-1.555v-.583a2.34 2.34 0 00-2.335-2.336h-.002zM9.75 12.75a.75.75 0 000 1.5h4.5a.75.75 0 000-1.5h-4.5z" /><path fill-rule="evenodd" d="M12 1.5c5.79 0 10.5 4.71 10.5 10.5S17.79 22.5 12 22.5 1.5 17.79 1.5 12 6.21 1.5 12 1.5zM2.85 12a9.15 9.15 0 019.15-9.15 9.15 9.15 0 019.15 9.15 9.15 9.15 0 01-9.15 9.15A9.15 9.15 0 012.85 12z" clip-rule="evenodd" /></svg>
-						<span>Ask Synthia</span>
-					</a>
-				</nav>
-			</div>
-			<form method="POST" action="?/logout" use:enhance={() => { 
-				handleLogout(); 
-				return async ({ update }) => { await update(); };
-			}}>
-				<button type="submit"
-					class={`flex items-center gap-3 px-3 py-2 rounded-md font-semibold w-full mt-auto transition-colors duration-150
-							${isDarkMode ? 'text-zinc-300 hover:bg-zinc-700' : 'text-gray-700 hover:bg-gray-100'}`}
-				>
-					<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" class={`w-5 h-5 ${isDarkMode ? 'stroke-zinc-300' : 'stroke-gray-700'}`}><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0 0 13.5 3h-6a2.25 2.25 0 0 0-2.25 2.25v13.5A2.25 2.25 0 0 0 7.5 21h6a2.25 2.25 0 0 0 2.25-2.25V15m3 0 3-3m0 0-3-3m3 3H9" /></svg>
-					<span>Log out</span>
-				</button>
-			</form>
-		</aside>
-		{#if isSidebarOpen}
-			<div on:click={closeSidebar} class="fixed inset-0 bg-black opacity-50 z-40 md:hidden" aria-hidden="true"></div>
-		{/if}
-	{/if}
+          <a href="/tasks" class="flex items-center gap-3 px-3 py-2 rounded-md font-semibold transition-colors duration-150" class:hover:bg-gray-100={!isDarkMode} class:hover:bg-zinc-700={isDarkMode} class:text-gray-700={!isDarkMode} class:text-zinc-300={isDarkMode}>
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5" aria-hidden="true">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M9 12h3.75M9 15h3.75M9 18h3.75m3 .75H18a2.25 2.25 0 0 0 2.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 0 0-1.123-.08m-5.801 0c-.065.21-.1.433-.1.664 0 .414.336.75.75.75h4.5a.75.75 0 0 0 .75-.75 2.25 2.25 0 0 0-.1-.664m-5.8 0A2.251 2.251 0 0 1 13.5 2.25H15c1.012 0 1.867.668 2.15 1.586m-5.8 0c-.376.023-.75.05-1.124.08C9.095 4.01 8.25 4.973 8.25 6.108V8.25m0 0H4.875c-.621 0-1.125.504-1.125 1.125v11.25c0 .621.504 1.125 1.125 1.125h9.75c.621 0 1.125-.504 1.125-1.125V9.375c0-.621-.504-1.125-1.125-1.125H8.25ZM6.75 12h.008v.008H6.75V12Zm0 3h.008v.008H6.75V15Zm0 3h.008v.008H6.75V18Z" />
+            </svg>
+            <span>All Tasks</span>
+          </a>
+          <a href="/calendar" class="flex items-center gap-3 px-3 py-2 rounded-md font-semibold transition-colors duration-150" class:hover:bg-gray-100={!isDarkMode} class:hover:bg-zinc-700={isDarkMode} class:text-gray-700={!isDarkMode} class:text-zinc-300={isDarkMode}>
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-5 h-5" aria-hidden="true">
+              <path fill-rule="evenodd" d="M6.75 2.25A.75.75 0 017.5 3v1.5h9V3A.75.75 0 0118 3v1.5h.75a3 3 0 013 3v11.25a3 3 0 01-3 3H5.25a3 3 0 01-3-3V7.5a3 3 0 013-3H6V3a.75.75 0 01.75-.75zM5.25 6.75c-.621 0-1.125.504-1.125 1.125V18a1.125 1.125 0 001.125 1.125h13.5A1.125 1.125 0 0019.875 18V7.875c0-.621-.504-1.125-1.125-1.125H5.25z" clip-rule="evenodd" /><path d="M10.5 9.75a.75.75 0 00-1.5 0v.01c0 .414.336.75.75.75H10.5v-.01a.75.75 0 000-1.5zM10.5 12.75a.75.75 0 00-1.5 0v.01c0 .414.336.75.75.75H10.5v-.01a.75.75 0 000-1.5zM10.5 15.75a.75.75 0 00-1.5 0v.01c0 .414.336.75.75.75H10.5v-.01a.75.75 0 000-1.5zM13.5 9.75a.75.75 0 00-1.5 0v.01c0 .414.336.75.75.75H13.5v-.01a.75.75 0 000-1.5zM13.5 12.75a.75.75 0 00-1.5 0v.01c0 .414.336.75.75.75H13.5v-.01a.75.75 0 000-1.5zM13.5 15.75a.75.75 0 00-1.5 0v.01c0 .414.336.75.75.75H13.5v-.01a.75.75 0 000-1.5zM16.5 9.75a.75.75 0 00-1.5 0v.01c0 .414.336.75.75.75H16.5v-.01a.75.75 0 000-1.5zM16.5 12.75a.75.75 0 00-1.5 0v.01c0 .414.336.75.75.75H16.5v-.01a.75.75 0 000-1.5zM16.5 15.75a.75.75 0 00-1.5 0v.01c0 .414.336.75.75.75H16.5v-.01a.75.75 0 000-1.5z"/></svg>
+            <span>Calendar</span>
+          </a>
+          <a href="/workspace" class="flex items-center gap-3 px-3 py-2 rounded-md font-semibold transition-colors duration-150" class:hover:bg-gray-100={!isDarkMode} class:hover:bg-zinc-700={isDarkMode} class:text-gray-700={!isDarkMode} class:text-zinc-300={isDarkMode}>
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5" aria-hidden="true">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M20.25 14.15v4.098a2.25 2.25 0 0 1-2.25 2.25h-12a2.25 2.25 0 0 1-2.25-2.25V14.15M18 18.75h.75A2.25 2.25 0 0 0 21 16.5v-1.5a2.25 2.25 0 0 0-2.25-2.25h-15A2.25 2.25 0 0 0 1.5 15v1.5A2.25 2.25 0 0 0 3.75 18.75H4.5M12 12.75a3 3 0 0 0-3-3H5.25V7.5a3 3 0 0 1 3-3h7.5a3 3 0 0 1 3 3v2.25H15a3 3 0 0 0-3 3Z" />
+            </svg>
+            <span>Workspace</span>
+          </a>
+          <a href="/ai-chat" class="flex items-center gap-3 px-3 py-2 rounded-md font-semibold transition-colors duration-150" class:hover:bg-gray-100={!isDarkMode} class:hover:bg-zinc-700={isDarkMode} class:text-gray-700={!isDarkMode} class:text-zinc-300={isDarkMode}>
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-5 h-5" aria-hidden="true"><path d="M12.001 2.504a2.34 2.34 0 00-2.335 2.335v.583c0 .582.212 1.13.582 1.556l.03.035-.03.034a2.34 2.34 0 00-2.917 3.916A3.287 3.287 0 004.08 14.25a3.287 3.287 0 003.287 3.287h8.266a3.287 3.287 0 003.287-3.287 3.287 3.287 0 00-1.253-2.583 2.34 2.34 0 00-2.917-3.916l-.03-.034.03-.035c.37-.425.582-.973.582-1.555v-.583a2.34 2.34 0 00-2.335-2.336h-.002zM9.75 12.75a.75.75 0 000 1.5h4.5a.75.75 0 000-1.5h-4.5z" /><path fill-rule="evenodd" d="M12 1.5c5.79 0 10.5 4.71 10.5 10.5S17.79 22.5 12 22.5 1.5 17.79 1.5 12 6.21 1.5 12 1.5zM2.85 12a9.15 9.15 0 019.15-9.15 9.15 9.15 0 019.15 9.15 9.15 9.15 0 01-9.15 9.15A9.15 9.15 0 012.85 12z" clip-rule="evenodd" /></svg>
+            <span>Ask Synthia</span>
+          </a>
+        </nav>
+      </div>
+      <button on:click={handleLogout} class="flex items-center gap-3 px-3 py-2 rounded-md font-semibold w-full mt-auto transition-colors duration-150" class:hover:bg-gray-100={!isDarkMode} class:hover:bg-zinc-700={isDarkMode} class:text-gray-700={!isDarkMode} class:text-zinc-300={isDarkMode}>
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0 0 13.5 3h-6a2.25 2.25 0 0 0-2.25 2.25v13.5A2.25 2.25 0 0 0 7.5 21h6a2.25 2.25 0 0 0 2.25-2.25V15m3 0 3-3m0 0-3-3m3 3H9" /></svg>
+        <span>Log out</span>
+      </button>
+    </div>
+  {/if}
 
-	<div class="flex-1 flex flex-col overflow-hidden">
-		<!-- HEADER COPIED AND ADAPTED FROM YOUR HOME PAGE -->
+	<div class="main-content-wrapper">
 		<header class={`top-header ${isDarkMode ? 'bg-zinc-800 border-zinc-700' : 'bg-white border-gray-200'}`}>
-			<div class="header-left">
-				<button id="hamburgerButton" class="menu-btn md:hidden" on:click={toggleSidebar} aria-label="Toggle Sidebar">
-					<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-6 h-6"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" /></svg>
-				</button>
-				<a href="/home" class="logo hidden md:flex">
-					<img src="/logonamin.png" alt="Microtask Logo" class="h-8 w-auto">
-					<span class={`${isDarkMode ? 'text-zinc-100' : 'text-gray-800'}`}>Microtask</span>
-				</a>
-				<h1 class="text-xl font-semibold ml-2 md:ml-0 ${isDarkMode ? 'text-zinc-100' : 'text-gray-800'}">Workspace</h1>
-			</div>
-			<div class="header-icons">
-				<div class="relative">
-					<button id="bellIcon" aria-label="Notifications">
-						<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-5 h-5" aria-hidden="true"><path fill-rule="evenodd" d="M5.25 9a6.75 6.75 0 0113.5 0v.75c0 2.123.8 4.057 2.118 5.52a.75.75 0 01-.297 1.206c-1.544.57-3.16.99-4.831 1.243a3.75 3.75 0 11-7.48 0c-1.673-.253-3.287-.673-4.831-1.243a.75.75 0 01-.297-1.206C4.45 13.807 5.25 11.873 5.25 9.75V9zm4.502 8.9a2.25 2.25 0 104.496 0H9.752z" clip-rule="evenodd" /></svg>
-					</button>
-					<div id="notifWindow" class={`dropdown-window hidden ${isDarkMode ? 'bg-zinc-700 border-zinc-600 text-zinc-300' : 'bg-white border-gray-200 text-gray-700'}`}>
-						<h3 class="font-semibold mb-2 text-sm">Notifications</h3><p class="text-xs">No new notifications.</p>
-					</div>
-				</div>
-				<div class="relative">
-					<button id="helpIcon" aria-label="Help & FAQ">
-						<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-5 h-5" aria-hidden="true"><path fill-rule="evenodd" d="M2.25 12c0-5.385 4.365-9.75 9.75-9.75s9.75 4.365 9.75 9.75-4.365 9.75-9.75 9.75S2.25 17.385 2.25 12zm8.706-1.442c1.146-.573 2.437.463 2.126 1.706l-.709 2.836.042-.02a.75.75 0 01.67 1.34l-.042.022c-1.147.573-2.438-.463-2.127-1.706l.71-2.836-.042.02a.75.75 0 11-.671-1.34l.041-.022zM12 9a.75.75 0 100-1.5.75.75 0 000 1.5z" clip-rule="evenodd" /></svg>
-					</button>
-					<div id="helpWindow" class={`dropdown-window hidden ${isDarkMode ? 'bg-zinc-700 border-zinc-600 text-zinc-300' : 'bg-white border-gray-200 text-gray-700'}`}>
-						<h3 class="font-semibold mb-2 text-sm">FAQ</h3>
-						<ul class="list-disc list-inside space-y-1 text-xs">
-							<li>How to create workspace?</li>
-							<li>Where are my tasks?</li>
-						</ul>
-						<a href="/support" class="text-xs text-blue-600 hover:underline mt-2 block ${isDarkMode ? 'dark:text-blue-400' : ''}">Visit Support</a>
-					</div>
-				</div>
-				<div class="relative">
-					<button id="profileIcon" aria-label="Profile Menu">
-						<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-5 h-5" aria-hidden="true"><path fill-rule="evenodd" d="M18.685 19.097A9.723 9.723 0 0021.75 12c0-5.385-4.365-9.75-9.75-9.75S2.25 6.615 2.25 12a9.723 9.723 0 003.065 7.097A9.716 9.716 0 0012 21.75a9.716 9.716 0 006.685-2.653zm-12.54-1.285A7.486 7.486 0 0112 15a7.486 7.486 0 015.855 2.812A8.224 8.224 0 0112 20.25a8.224 8.224 0 01-5.855-2.438zM15.75 9a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0z" clip-rule="evenodd" /></svg>
-					</button>
-					<div id="profileWindow" class={`dropdown-window hidden ${isDarkMode ? 'bg-zinc-700 border-zinc-600 text-zinc-300' : 'bg-white border-gray-200 text-gray-700'}`}>
-						<h3 class="font-semibold mb-2 text-sm">Profile</h3>
-						<p class="text-xs mb-2 truncate">Welcome, {username || 'User'}!</p>
-						<a href="/settings" class={`block text-xs px-2 py-1.5 rounded w-full text-left mb-1 transition-colors duration-150 ${isDarkMode ? 'bg-zinc-600 hover:bg-zinc-500 text-zinc-300' : 'bg-gray-100 hover:bg-gray-200 text-gray-700'}`}>Settings</a>
-						<form method="POST" action="?/logout" use:enhance={() => { 
-							handleLogout(); 
-							return async ({ update }) => { await update(); };
-						}}>
-							<button type="submit" class={`text-xs px-2 py-1.5 rounded w-full text-left transition-colors duration-150 ${isDarkMode ? 'bg-red-700 hover:bg-red-600 text-white' : 'bg-red-100 hover:bg-red-200 text-red-700'}`}>Logout</button>
-						</form>
-					</div>
-				</div>
-				<button id="darkModeToggle" aria-label="Toggle Dark Mode" class={`ml-2 p-1.5 rounded-full transition-colors duration-150 ${isDarkMode ? 'hover:bg-zinc-700 text-zinc-300' : 'hover:bg-gray-100 text-gray-700'}`}>
-					<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-5 h-5">
-						{#if isDarkMode} <path fill-rule="evenodd" d="M12 1.5a.75.75 0 01.75.75v1.5a.75.75 0 01-1.5 0v-1.5A.75.75 0 0112 1.5zM12 6.75a5.25 5.25 0 100 10.5 5.25 5.25 0 000-10.5zM12 15.75a3.75 3.75 0 100-7.5 3.75 3.75 0 000 7.5zM5.25 12a.75.75 0 01.75-.75h1.5a.75.75 0 010 1.5h-1.5a.75.75 0 01-.75-.75zm12 0a.75.75 0 01.75-.75h1.5a.75.75 0 010 1.5h-1.5a.75.75 0 01-.75-.75zm-2.645-4.97a.75.75 0 10-1.06-1.06L12.53 7.03a.75.75 0 001.06 1.06l1.06-1.061zM7.03 12.53a.75.75 0 10-1.06 1.06L7.03 14.65a.75.75 0 001.06-1.06L7.03 12.53zm7.59-5.56a.75.75 0 10-1.06-1.06l-1.06 1.06a.75.75 0 101.06 1.06l1.06-1.06zM7.03 7.03a.75.75 0 10-1.06 1.06l1.06 1.061a.75.75 0 101.06-1.06L7.03 7.03z" clip-rule="evenodd"/>
-						{:else} <path fill-rule="evenodd" d="M10.5 3.75a6.75 6.75 0 1 0 0 13.5 6.75 6.75 0 0 0 0-13.5ZM12 16.5a4.5 4.5 0 1 1 0-9 4.5 4.5 0 0 1 0 9Z" clip-rule="evenodd" /> {/if}
-					</svg>
-				</button>
-			</div>
-		</header>
+      <div class="header-left">
+        <button id="hamburgerButton" class="menu-btn" on:click={toggleSidebar} aria-label="Toggle Sidebar">
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-6 h-6"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" /></svg>
+        </button>
+        <a href="/home" class="logo">
+          <img src="/logonamin.png" alt="Microtask Logo" class="h-8 w-auto">
+          <span class={`${isDarkMode ? 'text-zinc-100' : 'text-gray-800'}`}>Microtask</span>
+        </a>
+      </div>
+      <div class="header-icons">
+        <div class="relative">
+          <button id="bellIcon" aria-label="Notifications">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-5 h-5" aria-hidden="true"><path fill-rule="evenodd" d="M5.25 9a6.75 6.75 0 0113.5 0v.75c0 2.123.8 4.057 2.118 5.52a.75.75 0 01-.297 1.206c-1.544.57-3.16.99-4.831 1.243a3.75 3.75 0 11-7.48 0c-1.673-.253-3.287-.673-4.831-1.243a.75.75 0 01-.297-1.206C4.45 13.807 5.25 11.873 5.25 9.75V9zm4.502 8.9a2.25 2.25 0 104.496 0H9.752z" clip-rule="evenodd" /></svg>
+          </button>
+          <div id="notifWindow" class={`dropdown-window hidden ${isDarkMode ? 'bg-zinc-700 border-zinc-600 text-zinc-300' : 'bg-white border-gray-200 text-gray-700'}`}>
+            <h3 class="font-semibold mb-2 text-sm">Notifications</h3><p class="text-xs">No new notifications.</p>
+          </div>
+        </div>
+        <div class="relative">
+          <button id="helpIcon" aria-label="Help & FAQ">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-5 h-5" aria-hidden="true"><path fill-rule="evenodd" d="M2.25 12c0-5.385 4.365-9.75 9.75-9.75s9.75 4.365 9.75 9.75-4.365 9.75-9.75 9.75S2.25 17.385 2.25 12zm8.706-1.442c1.146-.573 2.437.463 2.126 1.706l-.709 2.836.042-.02a.75.75 0 01.67 1.34l-.042.022c-1.147.573-2.438-.463-2.127-1.706l.71-2.836-.042.02a.75.75 0 11-.671-1.34l.041-.022zM12 9a.75.75 0 100-1.5.75.75 0 000 1.5z" clip-rule="evenodd" /></svg>
+          </button>
+          <div id="helpWindow" class={`dropdown-window hidden ${isDarkMode ? 'bg-zinc-700 border-zinc-600 text-zinc-300' : 'bg-white border-gray-200 text-gray-700'}`}>
+            <h3 class="font-semibold mb-2 text-sm">FAQ</h3>
+            <ul class="list-disc list-inside space-y-1 text-xs"><li>How do I add a task?</li><li>Where is the calendar?</li></ul>
+            <a href="/support" class="text-xs text-blue-600 hover:underline mt-2 block">Visit Support</a>
+          </div>
+        </div>
+        <div class="relative">
+          <button id="profileIcon" aria-label="Profile Menu">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-5 h-5" aria-hidden="true"><path fill-rule="evenodd" d="M18.685 19.097A9.723 9.723 0 0021.75 12c0-5.385-4.365-9.75-9.75-9.75S2.25 6.615 2.25 12a9.723 9.723 0 003.065 7.097A9.716 9.716 0 0012 21.75a9.716 9.716 0 006.685-2.653zm-12.54-1.285A7.486 7.486 0 0112 15a7.486 7.486 0 015.855 2.812A8.224 8.224 0 0112 20.25a8.224 8.224 0 01-5.855-2.438zM15.75 9a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0z" clip-rule="evenodd" /></svg>
+          </button>
+          <div id="profileWindow" class={`dropdown-window hidden ${isDarkMode ? 'bg-zinc-700 border-zinc-600 text-zinc-300' : 'bg-white border-gray-200 text-gray-700'}`}>
+            <h3 class="font-semibold mb-2 text-sm">Profile</h3>
+            <p class="text-xs mb-2 truncate">Welcome, {username || 'User'}!</p>
+            <button on:click={handleLogout} class={`text-xs px-2 py-1.5 rounded w-full text-left transition-colors duration-150 ${isDarkMode ? 'bg-red-700 hover:bg-red-600 text-zinc-300' : 'bg-red-100 hover:bg-red-200 text-red-700'}`}>Logout</button>
+          </div>
+        </div>
+        <button id="darkModeToggle" aria-label="Toggle Dark Mode" class={`ml-2 p-1.5 rounded-full transition-colors duration-150 ${isDarkMode ? 'hover:bg-zinc-700 text-zinc-300' : 'hover:bg-gray-100 text-gray-700'}`}>
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-5 h-5">
+            {#if isDarkMode} <path fill-rule="evenodd" d="M9.528 1.718a.75.75 0 0 0-.103.103l1.132 1.132a.75.75 0 0 0 1.06 0l1.132-1.132a.75.75 0 0 0-.103-1.06l-1.132-1.132a.75.75 0 0 0-1.06 0L9.63 1.615a.75.75 0 0 0-.102.103ZM12 3.75a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0v-1.5a.75.75 0 0 1 .75-.75ZM18.282 5.282a.75.75 0 0 0-1.06 0l-1.132 1.132a.75.75 0 0 0 .103 1.06l1.132 1.132a.75.75 0 0 0 1.06 0l1.132-1.132a.75.75 0 0 0-.103-1.06l-1.132-1.132a.75.75 0 0 0 0-.103ZM19.5 12a.75.75 0 0 1-.75.75h-1.5a.75.75 0 0 1 0-1.5h1.5a.75.75 0 0 1 .75.75ZM18.282 18.718a.75.75 0 0 0 0 1.06l1.132 1.132a.75.75 0 0 0 1.06 0l1.132-1.132a.75.75 0 0 0-.103-1.06l-1.132-1.132a.75.75 0 0 0-1.06 0l-1.132 1.132a.75.75 0 0 0 .103.103ZM12 18.75a.75.75 0 0 1-.75.75h-1.5a.75.75 0 0 1 0-1.5h1.5a.75.75 0 0 1 .75.75ZM5.718 18.718a.75.75 0 0 0 1.06 0l1.132-1.132a.75.75 0 0 0-.103-1.06l-1.132-1.132a.75.75 0 0 0-1.06 0L4.586 17.686a.75.75 0 0 0 .103 1.06l1.132 1.132a.75.75 0 0 0 0 .103ZM4.5 12a.75.75 0 0 1 .75-.75h1.5a.75.75 0 0 1 0 1.5h-1.5a.75.75 0 0 1-.75-.75ZM5.718 5.282a.75.75 0 0 0 0-1.06l-1.132-1.132a.75.75 0 0 0-1.06 0L2.39 4.114a.75.75 0 0 0 .103 1.06l1.132 1.132a.75.75 0 0 0 1.06 0l1.132-1.132a.75.75 0 0 0-.103-.103ZM12 6.75a5.25 5.25 0 0 1 5.25 5.25 5.25 5.25 0 0 1-5.25 5.25 5.25 5.25 0 0 1-5.25-5.25 5.25 5.25 0 0 1 5.25-5.25Z" clip-rule="evenodd" />
+            {:else} <path fill-rule="evenodd" d="M10.5 3.75a6.75 6.75 0 1 0 0 13.5 6.75 6.75 0 0 0 0-13.5ZM12 16.5a4.5 4.5 0 1 1 0-9 4.5 4.5 0 0 1 0 9Z" clip-rule="evenodd" /> {/if}
+          </svg>
+        </button>
+      </div>
+    </header>
 
 		{#if pageError && !formActionError && !templateFormActionError }
-			<div class="m-4 p-4 bg-red-100 border border-red-400 text-red-700 dark:bg-red-900/30 dark:border-red-700 dark:text-red-300 rounded-md relative" role="alert">
-				<strong class="font-bold">Error:</strong>
-				<span class="block sm:inline">{pageError}</span>
-				<button on:click={() => pageError = null} class="absolute top-0 bottom-0 right-0 px-4 py-3" aria-label="Close error">
-					<span class="text-2xl leading-none">×</span>
+			<div class="alert alert-error" role="alert">
+				<strong>Error:</strong>
+				<span>{pageError}</span>
+				<button on:click={() => pageError = null} class="alert-close-button" aria-label="Close error">
+					<span class="alert-close-icon">×</span>
 				</button>
 			</div>
 		{/if}
 		{#if pageSuccessMessage }
-			<div class="m-4 p-4 bg-green-100 border border-green-400 text-green-700 dark:bg-green-900/30 dark:border-green-700 dark:text-green-300 rounded-md relative" role="alert">
-				<span class="block sm:inline">{pageSuccessMessage}</span>
-				<button on:click={() => pageSuccessMessage = null} class="absolute top-0 bottom-0 right-0 px-4 py-3" aria-label="Close message">
-					<span class="text-2xl leading-none">×</span>
+			<div class="alert alert-success" role="alert">
+				<span>{pageSuccessMessage}</span>
+				<button on:click={() => pageSuccessMessage = null} class="alert-close-button" aria-label="Close message">
+					<span class="alert-close-icon">×</span>
 				</button>
 			</div>
 		{/if}
 		
-		<!-- MAIN CONTENT AREA WITH PADDING-TOP -->
-		<main class="flex-1 overflow-x-hidden overflow-y-auto p-4 sm:p-6 pt-[76px]">
-			<!-- Added pt-[76px] to prevent header clipping. Adjust value if header height changes. -->
-			<div class="container mx-auto">
-				<div class="flex justify-between items-center mb-6">
-					<h2 class="text-2xl font-semibold text-gray-700 dark:text-gray-300">Your Workspaces</h2>
-					<button on:click={openAddBoardModal} class="flex items-center bg-blue-500 hover:bg-blue-600 text-white font-semibold py-2 px-4 rounded-lg shadow-md transition-colors duration-150">
-						<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-5 h-5 mr-2"><path d="M10.75 4.75a.75.75 0 0 0-1.5 0v4.5h-4.5a.75.75 0 0 0 0 1.5h4.5v4.5a.75.75 0 0 0 1.5 0v-4.5h4.5a.75.75 0 0 0 0-1.5h-4.5v-4.5Z" /></svg>
-						New Workspace
-					</button>
-				</div>
-
-				<section class="mb-12">
-					<h3 class="text-xl font-semibold text-gray-600 dark:text-gray-400 mb-4 sr-only">List of Your Workspaces</h3>
+		<main class="main-area">
+			<div class="container">
+				<h2 class="section-title">Your Workspaces</h2>
+					
+				<section class="workspace-section">
+					<h3 class="sub-section-title sr-only">List of Your Workspaces</h3>
 					{#if boards && boards.length > 0}
-						<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+						<div class="workspace-grid">
 							{#each boards as board (board.id)}
-								<a href="/workspace/{board.id}" class="block bg-white dark:bg-zinc-800 rounded-lg shadow-lg hover:shadow-xl transition-shadow duration-200 p-6 relative">
-									<h4 class="text-lg font-bold text-blue-600 dark:text-blue-400 mb-2 truncate">{board.title}</h4>
+								<a href="/workspace/{board.id}" class="board-card">
+									<h4 class="board-card-title">{board.title}</h4>
 									{#if board.createdAtISO}
-										<p class="text-xs text-gray-500 dark:text-zinc-400">
+										<p class="board-card-meta">
 											Created: {new Date(board.createdAtISO).toLocaleDateString()}
 										</p>
 									{/if}
 									<button
 										on:click|stopPropagation|preventDefault={() => requestDeleteBoard(board)}
 										aria-label={`Delete workspace ${board.title}`}
-										class={`absolute top-2 right-2 p-1.5 rounded-full text-xs transition-colors duration-150 ${
-											isDarkMode ? 'text-red-400 hover:bg-red-700 hover:text-white' : 'text-red-500 hover:bg-red-100 hover:text-red-700'
-										}`}
+										class="board-card-delete-btn"
 										disabled={isDeletingBoard && boardToConfirmDelete?.id === board.id}
 									>
 										{#if isDeletingBoard && boardToConfirmDelete?.id === board.id}
-											<svg class="animate-spin h-4 w-4 text-currentColor" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+											<svg class="spinner" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
 												<circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
 												<path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
 											</svg>
 										{:else}
-											<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-4 h-4"><path fill-rule="evenodd" d="M8.75 1A2.75 2.75 0 0 0 6 3.75v.443c-.795.077-1.58.177-2.34.294a.75.75 0 0 0-.706.705c-.117.76-.217 1.545-.294 2.34V16.25A2.75 2.75 0 0 0 5.25 19h9.5A2.75 2.75 0 0 0 17.5 16.25V7.534c-.077-.795-.177-1.58-.294-2.34a.75.75 0 0 0-.705-.705c-.76-.117-1.545-.217-2.34-.294V3.75A2.75 2.75 0 0 0 11.25 1h-2.5ZM10 4c.84 0 1.67.036 2.5.108V5.25a.75.75 0 0 0 .75.75h1.142c.072.83.108 1.66.108 2.5v6.392c0 .84-.036 1.67-.108 2.5H6.608c-.072-.83-.108-1.66-.108-2.5V8.5c0-.84.036 1.67.108 2.5h1.142a.75.75 0 0 0 .75-.75V4.108C8.33 4.036 9.16 4 10 4ZM8.58 7.72a.75.75 0 0 0-1.06-1.06L6.25 8a.75.75 0 0 0-1.06 1.06L6.44 10l-1.27 1.27a.75.75 0 1 0 1.06 1.06L7.5 11.06l1.27 1.27a.75.75 0 1 0 1.06-1.06L8.56 10l1.27-1.27a.75.75 0 0 0-1.06-1.06L7.5 8.94l.06-.06Z" clip-rule="evenodd" /></svg>
+											<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="icon-sm"><path fill-rule="evenodd" d="M8.75 1A2.75 2.75 0 0 0 6 3.75v.443c-.795.077-1.58.177-2.34.294a.75.75 0 0 0-.706.705c-.117.76-.217 1.545-.294 2.34V16.25A2.75 2.75 0 0 0 5.25 19h9.5A2.75 2.75 0 0 0 17.5 16.25V7.534c-.077-.795-.177-1.58-.294-2.34a.75.75 0 0 0-.705-.705c-.76-.117-1.545-.217-2.34-.294V3.75A2.75 2.75 0 0 0 11.25 1h-2.5ZM10 4c.84 0 1.67.036 2.5.108V5.25a.75.75 0 0 0 .75.75h1.142c.072.83.108 1.66.108 2.5v6.392c0 .84-.036 1.67-.108 2.5H6.608c-.072-.83-.108-1.66-.108-2.5V8.5c0-.84.036 1.67.108 2.5h1.142a.75.75 0 0 0 .75-.75V4.108C8.33 4.036 9.16 4 10 4ZM8.58 7.72a.75.75 0 0 0-1.06-1.06L6.25 8a.75.75 0 0 0-1.06 1.06L6.44 10l-1.27 1.27a.75.75 0 1 0 1.06 1.06L7.5 11.06l1.27 1.27a.75.75 0 1 0 1.06-1.06L8.56 10l1.27-1.27a.75.75 0 0 0-1.06-1.06L7.5 8.94l.06-.06Z" clip-rule="evenodd" /></svg>
 									{/if}
 								</button>
 							</a>
 						{/each}
-						<button on:click={openAddBoardModal} class="flex flex-col items-center justify-center bg-gray-50 dark:bg-zinc-800/50 border-2 border-dashed border-gray-300 dark:border-zinc-700 rounded-lg shadow-sm hover:shadow-md hover:border-blue-400 dark:hover:border-blue-500 transition-all duration-200 p-6 text-gray-500 dark:text-zinc-400 hover:text-blue-500 dark:hover:text-blue-400 min-h-[120px]">
-							<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-8 h-8 mb-2"><path d="M10.75 4.75a.75.75 0 0 0-1.5 0v4.5h-4.5a.75.75 0 0 0 0 1.5h4.5v4.5a.75.75 0 0 0 1.5 0v-4.5h4.5a.75.75 0 0 0 0-1.5h-4.5v-4.5Z" /></svg>
+						<button on:click={openAddBoardModal} class="add-workspace-card">
+							<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="icon-lg"><path d="M10.75 4.75a.75.75 0 0 0-1.5 0v4.5h-4.5a.75.75 0 0 0 0 1.5h4.5v4.5a.75.75 0 0 0 1.5 0v-4.5h4.5a.75.75 0 0 0 0-1.5h-4.5v-4.5Z" /></svg>
 							<span class="text-sm font-medium">Add Workspace</span>
 						</button>
 					</div>
 				{:else if !data.error}
-					<div class="text-center py-10 px-6 bg-white dark:bg-zinc-800 rounded-lg shadow">
-						<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-16 h-16 text-gray-400 dark:text-zinc-500 mx-auto mb-4">
+					<div class="empty-state-workspaces">
+						<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="icon-xl">
 							<path d="M2.25 21h19.5A2.25 2.25 0 0024 18.75V5.25A2.25 2.25 0 0021.75 3H2.25A2.25 2.25 0 000 5.25v13.5A2.25 2.25 0 002.25 21zM18.75 10.5A.75.75 0 0118 9.75H6a.75.75 0 010-1.5h12a.75.75 0 01.75.75v3a.75.75 0 01-1.5 0v-1.5H9.75V15A.75.75 0 019 15.75H7.5a.75.75 0 01-.75-.75V9.362a2.251 2.251 0 011.437-2.097l4.5-.818a2.25 2.25 0 012.563 2.097v1.875H18a.75.75 0 01.75.75v.375z" />
 						</svg>
-						<h3 class="text-xl font-semibold text-gray-700 dark:text-gray-300 mb-2">No Workspaces Yet</h3>
-						<p class="text-gray-500 dark:text-zinc-400 mb-4">
+						<h3>No Workspaces Yet</h3>
+						<p>
 							It looks like you haven't created any workspaces. <br />
 							Workspaces help you organize your tasks into projects or different areas of focus.
 						</p>
-						<button on:click={openAddBoardModal} class="bg-green-500 hover:bg-green-600 text-white font-semibold py-2 px-6 rounded-lg shadow-md transition-colors duration-150">
+						<button on:click={openAddBoardModal} class="button button-success">
 							Create Your First Workspace
 						</button>
 					</div>
 				{/if}
 			</section>
 
-			<section class="mt-12"> <!-- Changed from mb-12 to mt-12 -->
-				<h3 class="text-xl font-semibold text-gray-600 dark:text-gray-400 mb-1">PREMADE TEMPLATES FOR YOUR WORKSPACE</h3>
-				<p class="text-sm text-gray-500 dark:text-zinc-400 mb-6">
-					Having a hard time getting started? Use our pre-made workspace templates to jump right in and stay productive—no stress, just progress.
+			<section class="template-section">
+				<h3 class="sub-section-title">AI-assisted templates</h3>
+				<p class="section-description">
+					Having a hard time getting started? Use our ai assisted workspace templates to jump right in and stay productive—no stress, just progress.
 				</p>
-				<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+				<div class="template-grid">
 					{#each templates as template (template.title)}
-						<div class="bg-white dark:bg-zinc-800 rounded-lg shadow-lg p-6 flex flex-col">
-							<div class="flex items-center mb-3">
-								<span class="p-2 bg-blue-100 dark:bg-blue-700/30 rounded-full mr-3">
+						<div class="template-card">
+							<div class="template-card-header">
+								<span class="template-card-icon-wrapper">
 									{#if template.iconKey === "study"}
-										<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-5 h-5 text-blue-500 dark:text-blue-400"><path d="M2.5 1A1.5 1.5 0 0 0 1 2.5v15A1.5 1.5 0 0 0 2.5 19h15a1.5 1.5 0 0 0 1.5-1.5v-15A1.5 1.5 0 0 0 17.5 1h-15ZM2.75 5.24v11.261c0 .136.11.25.25.25h13.998a.25.25 0 0 0 .251-.25V5.239c-.54.091-1.12.15-1.749.17P12.5 5.5 10 6l-2.5-.5c-.63-.02-1.209-.079-1.751-.17Z" /></svg>
+										<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor"><path d="M2.5 1A1.5 1.5 0 0 0 1 2.5v15A1.5 1.5 0 0 0 2.5 19h15a1.5 1.5 0 0 0 1.5-1.5v-15A1.5 1.5 0 0 0 17.5 1h-15ZM2.75 5.24v11.261c0 .136.11.25.25.25h13.998a.25.25 0 0 0 .251-.25V5.239c-.54.091-1.12.15-1.749.17P12.5 5.5 10 6l-2.5-.5c-.63-.02-1.209-.079-1.751-.17Z" /></svg>
 									{:else if template.iconKey === "work"}
-										<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-5 h-5 text-blue-500 dark:text-blue-400"><path fill-rule="evenodd" d="M6 3.75A2.75 2.75 0 0 1 8.75 1h2.5A2.75 2.75 0 0 1 14 3.75v.438A2.5 2.5 0 0 0 12.5 3h-5A2.5 2.5 0 0 0 6 4.188V3.75ZM13.5 6A1.5 1.5 0 0 1 15 7.5v6A1.5 1.5 0 0 1 13.5 15h-7A1.5 1.5 0 0 1 5 13.5v-6A1.5 1.5 0 0 1 6.5 6h7Zm0 1.5H6.5V13h7V7.5Z" clip-rule="evenodd" /></svg>
+										<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M6 3.75A2.75 2.75 0 0 1 8.75 1h2.5A2.75 2.75 0 0 1 14 3.75v.438A2.5 2.5 0 0 0 12.5 3h-5A2.5 2.5 0 0 0 6 4.188V3.75ZM13.5 6A1.5 1.5 0 0 1 15 7.5v6A1.5 1.5 0 0 1 13.5 15h-7A1.5 1.5 0 0 1 5 13.5v-6A1.5 1.5 0 0 1 6.5 6h7Zm0 1.5H6.5V13h7V7.5Z" clip-rule="evenodd" /></svg>
 									{:else if template.iconKey === "self-improvement"}
-										<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-5 h-5 text-blue-500 dark:text-blue-400"><path d="M11.213 4.042S8.446 3.214 6.83 4.83c-1.224 1.223-1.037 3.304.196 4.537l-.392.393a.75.75 0 001.06 1.061l.393-.392c1.233 1.233 3.314 1.037 4.537.196 1.617-1.617.789-4.384.789-4.384S12.436 5.266 11.213 4.042ZM10 9.5a1.5 1.5 0 110-3 1.5 1.5 0 010 3Z" /><path d="M17.5 6.5c0 .69-.56 1.25-1.25 1.25S15 7.19 15 6.5s.56-1.25 1.25-1.25S17.5 5.81 17.5 6.5ZM14.452 2.456a1.25 1.25 0 011.768 0l.022.021c.48.48.48 1.256 0 1.736L15.25 5.206a1.25 1.25 0 01-1.736-1.736l.938-.914Z" /></svg>
-									{:else}
-										<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-5 h-5 text-blue-500 dark:text-blue-400"><path d="M10 3.75a2.25 2.25 0 1 0 0 4.5 2.25 2.25 0 0 0 0-4.5ZM9.25 9.545v4.578A.75.75 0 0 0 10 14.873a.75.75 0 0 0 .75-.75V9.546A2.265 2.265 0 0 1 10 9.25c-.134 0-.265.01-.393.029a2.257 2.257 0 0 1-.357.266ZM7.625 5.155A2.255 2.255 0 0 1 7.5 5.5c0 .481.153.923.412 1.285A2.255 2.255 0 0 1 7.625 5.155ZM5.155 7.625A2.255 2.255 0 0 1 5.5 7.5c.481 0 .923.153 1.285.412A2.255 2.255 0 0 1 5.155 7.625ZM12.375 5.155A2.255 2.255 0 0 1 12.5 5.5c0 .481-.153.923-.412 1.285A2.255 2.255 0 0 1 12.375 5.155ZM14.845 7.625A2.255 2.255 0 0 1 14.5 7.5c-.481 0-.923.153-1.285.412A2.255 2.255 0 0 1 14.845 7.625Z" /></svg>
+										<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor"><path d="M11.213 4.042S8.446 3.214 6.83 4.83c-1.224 1.223-1.037 3.304.196 4.537l-.392.393a.75.75 0 001.06 1.061l.393-.392c1.233 1.233 3.314 1.037 4.537.196 1.617-1.617.789-4.384.789-4.384S12.436 5.266 11.213 4.042ZM10 9.5a1.5 1.5 0 110-3 1.5 1.5 0 010 3Z" /><path d="M17.5 6.5c0 .69-.56 1.25-1.25 1.25S15 7.19 15 6.5s.56-1.25 1.25-1.25S17.5 5.81 17.5 6.5ZM14.452 2.456a1.25 1.25 0 011.768 0l.022.021c.48.48.48 1.256 0 1.736L15.25 5.206a1.25 1.25 0 01-1.736-1.736l.938-.914Z" /></svg>
+									{:else} <!-- Default icon -->
+										<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor"><path d="M10 3.75a2.25 2.25 0 1 0 0 4.5 2.25 2.25 0 0 0 0-4.5ZM9.25 9.545v4.578A.75.75 0 0 0 10 14.873a.75.75 0 0 0 .75-.75V9.546A2.265 2.265 0 0 1 10 9.25c-.134 0-.265.01-.393.029a2.257 2.257 0 0 1-.357.266ZM7.625 5.155A2.255 2.255 0 0 1 7.5 5.5c0 .481.153.923.412 1.285A2.255 2.255 0 0 1 7.625 5.155ZM5.155 7.625A2.255 2.255 0 0 1 5.5 7.5c.481 0 .923.153 1.285.412A2.255 2.255 0 0 1 5.155 7.625ZM12.375 5.155A2.255 2.255 0 0 1 12.5 5.5c0 .481-.153.923-.412 1.285A2.255 2.255 0 0 1 12.375 5.155ZM14.845 7.625A2.255 2.255 0 0 1 14.5 7.5c-.481 0-.923.153-1.285.412A2.255 2.255 0 0 1 14.845 7.625Z" /></svg>
 									{/if}
 								</span>
-								<h4 class="text-lg font-bold text-gray-700 dark:text-gray-200">{template.title}</h4>
+								<h4 class="template-card-title">{template.title}</h4>
 							</div>
-							<p class="text-sm text-gray-600 dark:text-zinc-400 mb-3">
+							<p class="template-card-goal">
 								<strong class="font-medium">Goal:</strong> {template.goal}
 							</p>
-							<ul class="list-disc list-inside text-sm text-gray-500 dark:text-zinc-400 space-y-1 mb-4 flex-grow">
+							<ul class="template-card-steps">
 								{#each template.steps.slice(0, 4) as step}
 									<li>{step.text}</li>
 								{/each}
@@ -596,7 +551,7 @@
 							</ul>
 							<button
 								on:click={() => openTemplateUsageModal(template)}
-								class="mt-auto w-full bg-green-500 hover:bg-green-600 text-white font-semibold py-2 px-4 rounded-lg shadow-md transition-colors duration-150"
+								class="button button-success template-card-button"
 							>
 								Use Template
 							</button>
@@ -607,50 +562,42 @@
 		</div>
 	</main>
 
-	<footer class="text-center p-4 text-sm text-gray-500 dark:text-zinc-400 border-t dark:border-zinc-700">
+	<footer class="app-footer">
 		Microtask © {new Date().getFullYear()}
 	</footer>
 </div>
-</div>
-<!-- Modals (Add Board, Delete Board, Use Template) -->
-<!-- Add Board Modal -->
+
+<!-- Modals -->
 {#if showAddBoardModal}
-<div class="fixed inset-0 z-[100] flex items-center justify-center bg-black bg-opacity-60 backdrop-blur-sm p-4" id="addBoardModalOverlay">
-	<div id="addBoardModalContent" class="bg-white dark:bg-zinc-800 p-6 rounded-lg shadow-xl w-full max-w-md transform transition-all">
-		<div class="flex justify-between items-center mb-4">
-			<h3 class="text-xl font-semibold text-gray-700 dark:text-gray-200">Create New Workspace</h3>
-			<button on:click={closeAddBoardModal} class="text-gray-400 hover:text-gray-600 dark:hover:text-zinc-300 transition-colors">
-				<span class="text-2xl leading-none">×</span>
+<div class="modal-overlay" id="addBoardModalOverlay">
+	<div id="addBoardModalContent" class="modal-content">
+		<div class="modal-header">
+			<h3 class="modal-title">Create New Workspace</h3>
+			<button on:click={closeAddBoardModal} class="modal-close-button">
+				<span>×</span>
 			</button>
 		</div>
 		<form method="POST" action="?/addBoard" use:enhance={() => {
             isSubmittingWorkspace = true;
             formActionError = null; 
-            return async ({ update }) => {
-                await update(); 
-            };
+            return async ({ update }) => { await update(); };
         }}>
-			<div class="mb-4">
-				<label for="workspaceNameModalInput" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Workspace Name <span class="text-red-500">*</span></label>
+			<div class="modal-form-group">
+				<label for="workspaceNameModalInput" class="modal-label">Workspace Name <span class="required-asterisk">*</span></label>
 				<input type="text" id="workspaceNameModalInput" name="title" bind:value={workspaceNameInput} required maxlength="100"
-					class="w-full px-3 py-2 border border-gray-300 dark:border-zinc-600 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 dark:bg-zinc-700 dark:text-white"
-					placeholder="e.g., Q3 Project, Home Renovation"
+					class="modal-input" placeholder="e.g., Q3 Project, Home Renovation"
 				/>
 			</div>
 			{#if formActionError}
-				<p class="text-sm text-red-500 dark:text-red-400 mb-3">{formActionError}</p>
+				<p class="form-action-error">{formActionError}</p>
 			{/if}
-			<div class="flex justify-end space-x-3">
-				<button type="button" on:click={closeAddBoardModal}
-					class="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-zinc-700 hover:bg-gray-200 dark:hover:bg-zinc-600 rounded-md border border-gray-300 dark:border-zinc-500 transition-colors"
-					disabled={isSubmittingWorkspace}>
+			<div class="modal-actions">
+				<button type="button" on:click={closeAddBoardModal} class="button button-default" disabled={isSubmittingWorkspace}>
 					Cancel
 				</button>
-				<button type="submit"
-					class="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-md shadow-sm focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-colors disabled:opacity-50 flex items-center"
-					disabled={isSubmittingWorkspace || !workspaceNameInput.trim()}>
+				<button type="submit" class="button button-primary" disabled={isSubmittingWorkspace || !workspaceNameInput.trim()}>
 					{#if isSubmittingWorkspace}
-						<svg class="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+						<svg class="button-spinner" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
 							<circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
 							<path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
 						</svg> Creating...
@@ -663,40 +610,34 @@
 	</div>
 </div>
 {/if}
-<!-- Delete Board Confirmation Modal -->
+
 {#if showDeleteBoardConfirm && boardToConfirmDelete}
-<div class="fixed inset-0 z-[100] flex items-center justify-center bg-black bg-opacity-60 backdrop-blur-sm p-4" id="deleteBoardModalOverlay">
-	<div id="deleteBoardModalContent" class="bg-white dark:bg-zinc-800 p-6 rounded-lg shadow-xl w-full max-w-md transform transition-all">
-		<div class="flex justify-between items-center mb-4">
-			<h3 class="text-xl font-semibold text-red-600 dark:text-red-400">Confirm Deletion</h3>
-			<button on:click={closeDeleteBoardConfirm} class="text-gray-400 hover:text-gray-600 dark:hover:text-zinc-300 transition-colors">
-				<span class="text-2xl leading-none">×</span>
+<div class="modal-overlay" id="deleteBoardModalOverlay">
+	<div id="deleteBoardModalContent" class="modal-content">
+		<div class="modal-header">
+			<h3 class="modal-title modal-title-danger">Confirm Deletion</h3>
+			<button on:click={closeDeleteBoardConfirm} class="modal-close-button">
+				<span>×</span>
 			</button>
 		</div>
 		<form method="POST" action="?/deleteBoard" use:enhance={() => {
             isDeletingBoard = true;
-            return async ({ update }) => {
-                await update();
-            };
+            return async ({ update }) => { await update(); };
         }}>
 			<input type="hidden" name="boardId" value={boardToConfirmDelete.id} />
-			<p class="text-gray-600 dark:text-gray-300 mb-2">
+			<p class="modal-text-confirm">
 				Are you sure you want to delete the workspace "<strong>{boardToConfirmDelete.title}</strong>"?
 			</p>
-			<p class="text-sm text-red-500 dark:text-red-400 mb-6">
+			<p class="modal-text-warning">
 				This action cannot be undone and will also delete ALL tasks within this workspace.
 			</p>
-			<div class="flex justify-end space-x-3">
-				<button type="button" on:click={closeDeleteBoardConfirm}
-					class="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-zinc-700 hover:bg-gray-200 dark:hover:bg-zinc-600 rounded-md border border-gray-300 dark:border-zinc-500 transition-colors"
-					disabled={isDeletingBoard}>
+			<div class="modal-actions">
+				<button type="button" on:click={closeDeleteBoardConfirm} class="button button-default" disabled={isDeletingBoard}>
 					Cancel
 				</button>
-				<button type="submit"
-					class="px-4 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-md shadow-sm focus:ring-2 focus:ring-offset-2 focus:ring-red-500 transition-colors disabled:opacity-50 flex items-center"
-					disabled={isDeletingBoard}>
+				<button type="submit" class="button button-danger" disabled={isDeletingBoard}>
 					{#if isDeletingBoard}
-						<svg class="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+						<svg class="button-spinner" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
 							<circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
 							<path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
 						</svg> Deleting...
@@ -709,241 +650,982 @@
 	</div>
 </div>
 {/if}
-<!-- Use Template Modal -->
+
 {#if showTemplateUsageModal && selectedTemplateForUsage}
-<div class="fixed inset-0 z-[100] flex items-center justify-center bg-black bg-opacity-60 backdrop-blur-sm p-4" id="templateUsageModalOverlay">
-	<div id="templateUsageModalContent" class="bg-white dark:bg-zinc-800 p-6 rounded-lg shadow-xl w-full max-w-lg transform transition-all max-h-[90vh] flex flex-col">
-		<div class="flex justify-between items-center mb-4 flex-shrink-0">
-			<h3 class="text-xl font-semibold text-gray-700 dark:text-gray-200">Use Template: {selectedTemplateForUsage.title}</h3>
-			<button on:click={closeTemplateUsageModal} class="text-gray-400 hover:text-gray-600 dark:hover:text-zinc-300 transition-colors">
-				<span class="text-2xl leading-none">×</span>
+<div class="modal-overlay" id="templateUsageModalOverlay">
+	<div id="templateUsageModalContent" class="modal-content modal-content-large">
+		<div class="modal-header">
+			<h3 class="modal-title">Use Template: {selectedTemplateForUsage.title}</h3>
+			<button on:click={closeTemplateUsageModal} class="modal-close-button">
+				<span>×</span>
 			</button>
 		</div>
-<form method="POST" action="?/createWorkspaceFromTemplate" use:enhance={() => {
-		isSubmittingTemplateWorkspace = true;
-		templateFormActionError = null;
-		templateFormSuccessMessage = null; 
-		return async ({ update }) => {
-			await update(); 
-		};
-	}} class="flex flex-col flex-grow overflow-hidden">
-		<div class="overflow-y-auto pr-2 flex-grow mb-4 custom-scrollbar">
-			<p class="text-sm text-gray-600 dark:text-zinc-400 mb-3"><strong class="font-medium">Template Goal:</strong> {selectedTemplateForUsage.goal}</p>
-			
-			<input type="hidden" name="templateTitle" value={selectedTemplateForUsage.title} />
-			<input type="hidden" name="templateGoal" value={selectedTemplateForUsage.goal} />
-			<input type="hidden" name="templateStepsJSON" value={JSON.stringify(selectedTemplateForUsage.steps)} />
-			<input type="hidden" name="stepSpecificInputsJSON" value={JSON.stringify(stepSpecificInputs)} />
+		<form method="POST" action="?/createWorkspaceFromTemplate" use:enhance={() => {
+			isSubmittingTemplateWorkspace = true;
+			templateFormActionError = null;
+			templateFormSuccessMessage = null; 
+			return async ({ update }) => { await update(); };
+		}} class="modal-form-flex-grow">
+			<div class="modal-form-scrollable custom-scrollbar">
+				<p class="template-modal-goal"><strong class="font-medium">Template Goal:</strong> {selectedTemplateForUsage.goal}</p>
+				
+				<input type="hidden" name="templateTitle" value={selectedTemplateForUsage.title} />
+				<input type="hidden" name="templateGoal" value={selectedTemplateForUsage.goal} />
+				<input type="hidden" name="templateStepsJSON" value={JSON.stringify(selectedTemplateForUsage.steps)} />
+				<input type="hidden" name="stepSpecificInputsJSON" value={JSON.stringify(stepSpecificInputs)} />
 
-			<div class="mb-4">
-				<label for="newWorkspaceNameFromTemplate" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Name for your new workspace <span class="text-red-500">*</span></label>
-				<input type="text" id="newWorkspaceNameFromTemplate" name="workspaceName" bind:value={newWorkspaceNameFromTemplate} required maxlength="100"
-					class="w-full px-3 py-2 border border-gray-300 dark:border-zinc-600 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 dark:bg-zinc-700 dark:text-white"
-					placeholder="e.g., My Study Plan for Finals"
-				/>
-			</div>
-
-			<div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-				<div>
-					<label for="projectStartDate" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Plan Start Date</label>
-					<input type="date" id="projectStartDate" name="projectStartDate" bind:value={projectStartDate}
-						class="w-full px-3 py-2 border border-gray-300 dark:border-zinc-600 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 dark:bg-zinc-700 dark:text-white"
-					/>
-					<p class="text-xs text-gray-500 dark:text-zinc-400 mt-1">Tasks will be scheduled from this date.</p>
+				<div class="modal-form-group">
+					<label for="newWorkspaceNameFromTemplate" class="modal-label">Name for your new workspace <span class="required-asterisk">*</span></label>
+					<input type="text" id="newWorkspaceNameFromTemplate" name="workspaceName" bind:value={newWorkspaceNameFromTemplate} required maxlength="100"
+						class="modal-input" placeholder="e.g., My Study Plan for Finals" />
 				</div>
-				<div>
-					<label for="projectEndDate" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Plan End Date (Optional)</label>
-					<input type="date" id="projectEndDate" name="projectEndDate" bind:value={projectEndDate}
-						class="w-full px-3 py-2 border border-gray-300 dark:border-zinc-600 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 dark:bg-zinc-700 dark:text-white"
-					/>
-					<p class="text-xs text-gray-500 dark:text-zinc-400 mt-1">Distribute tasks until this date if set.</p>
-				</div>
-			</div>
-			
-			<hr class="my-4 dark:border-zinc-700"/>
-			<p class="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Help the AI tailor your tasks:</p>
 
-			{#each selectedTemplateForUsage.steps as step, i}
-				{#if step.inputPrompt}
-					<div class="mb-4 p-3 bg-gray-50 dark:bg-zinc-700/50 rounded-md border dark:border-zinc-600">
-						<label for={`step-input-${i}`} class="block text-sm font-medium text-gray-600 dark:text-gray-300 mb-1.5">{step.inputPrompt}</label>
-						{#if step.inputType === 'textarea'}
-							<textarea id={`step-input-${i}`} name={`step_input_${i}`} bind:value={stepSpecificInputs[i]} rows="2"
-								class="w-full px-3 py-2 border border-gray-300 dark:border-zinc-600 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 dark:bg-zinc-700 dark:text-white"
-							></textarea>
-						{:else}
-							<input type="text" id={`step-input-${i}`} name={`step_input_${i}`} bind:value={stepSpecificInputs[i]}
-								class="w-full px-3 py-2 border border-gray-300 dark:border-zinc-600 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 dark:bg-zinc-700 dark:text-white"
-							/>
-						{/if}
-						<p class="text-xs text-gray-500 dark:text-zinc-400 mt-1">AI will use this to customize the task: "<em>{step.text}</em>".</p>
+				<div class="date-input-grid">
+					<div>
+						<label for="projectStartDate" class="modal-label">Plan Start Date</label>
+						<input type="date" id="projectStartDate" name="projectStartDate" bind:value={projectStartDate} class="modal-input" />
+						<p class="input-hint">Tasks will be scheduled from this date.</p>
 					</div>
+					<div>
+						<label for="projectEndDate" class="modal-label">Plan End Date (Optional)</label>
+						<input type="date" id="projectEndDate" name="projectEndDate" bind:value={projectEndDate} class="modal-input" />
+						<p class="input-hint">Distribute tasks until this date if set.</p>
+					</div>
+				</div>
+				
+				<hr class="modal-divider"/>
+				<p class="ai-prompt-section-title">Help the AI tailor your tasks:</p>
+
+				{#each selectedTemplateForUsage.steps as step, i}
+					{#if step.inputPrompt}
+						<div class="step-input-container">
+							<label for={`step-input-${i}`} class="step-input-label">{step.inputPrompt}</label>
+							{#if step.inputType === 'textarea'}
+								<textarea id={`step-input-${i}`} name={`step_input_${i}`} bind:value={stepSpecificInputs[i]} rows="2" class="modal-textarea"></textarea>
+							{:else}
+								<input type="text" id={`step-input-${i}`} name={`step_input_${i}`} bind:value={stepSpecificInputs[i]} class="modal-input" />
+							{/if}
+							<p class="step-input-hint">AI will use this to customize the task: "<em>{step.text}</em>".</p>
+						</div>
+					{/if}
+				{/each}
+
+				<hr class="modal-divider"/>
+
+				<div class="modal-form-group">
+					<label for="projectNotes" class="modal-label">General Notes/Additional Context (Optional)</label>
+					<textarea id="projectNotes" name="projectNotes" bind:value={projectNotes} rows="2" class="modal-textarea"
+						placeholder="Any other details for the AI to consider for all tasks."></textarea>
+				</div>
+
+				{#if templateFormActionError}
+					<p class="form-action-error">{templateFormActionError}</p>
 				{/if}
-			{/each}
-
-			<hr class="my-4 dark:border-zinc-700"/>
-
-			<div class="mb-4">
-				<label for="projectNotes" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">General Notes/Additional Context (Optional)</label>
-				<textarea id="projectNotes" name="projectNotes" bind:value={projectNotes} rows="2"
-					class="w-full px-3 py-2 border border-gray-300 dark:border-zinc-600 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 dark:bg-zinc-700 dark:text-white"
-					placeholder="Any other details for the AI to consider for all tasks."
-				></textarea>
+				{#if templateFormSuccessMessage && !pageSuccessMessage}
+					<p class="form-success-message">{templateFormSuccessMessage}</p>
+				{/if}
 			</div>
-
-			{#if templateFormActionError}
-				<p class="text-sm text-red-500 dark:text-red-400 mb-3">{templateFormActionError}</p>
-			{/if}
-			{#if templateFormSuccessMessage && !pageSuccessMessage}
-				<p class="text-sm text-green-500 dark:text-green-400 mb-3">{templateFormSuccessMessage}</p>
-			{/if}
-		</div>
-		
-		<div class="flex justify-end space-x-3 pt-4 border-t dark:border-zinc-700 flex-shrink-0">
-			<button type="button" on:click={closeTemplateUsageModal}
-				class="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-zinc-700 hover:bg-gray-200 dark:hover:bg-zinc-600 rounded-md border border-gray-300 dark:border-zinc-500 transition-colors"
-				disabled={isSubmittingTemplateWorkspace}>
-				Cancel
-			</button>
-			<button type="submit"
-				class="px-4 py-2 text-sm font-medium text-white bg-green-600 hover:bg-green-700 rounded-md shadow-sm focus:ring-2 focus:ring-offset-2 focus:ring-green-500 transition-colors disabled:opacity-50 flex items-center"
-				disabled={isSubmittingTemplateWorkspace || !newWorkspaceNameFromTemplate.trim()}>
-				{#if isSubmittingTemplateWorkspace}
-					<svg class="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-						<circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-						<path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-					</svg> Creating...
-				{:else}
-					Create Workspace & AI Tasks
-				{/if}
-			</button>
-		</div>
-	</form>
-</div>
+			
+			<div class="modal-footer-actions">
+				<button type="button" on:click={closeTemplateUsageModal} class="button button-default" disabled={isSubmittingTemplateWorkspace}>
+					Cancel
+				</button>
+				<button type="submit" class="button button-success" disabled={isSubmittingTemplateWorkspace || !newWorkspaceNameFromTemplate.trim()}>
+					{#if isSubmittingTemplateWorkspace}
+						<svg class="button-spinner" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+							<circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+							<path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+						</svg> Creating...
+					{:else}
+						Create Workspace & AI Tasks
+					{/if}
+				</button>
+			</div>
+		</form>
+	</div>
 </div>
 {/if}
+</div>
 <style>
-	.font-sans { font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
-	:global(body, html) { height: 100%; margin: 0; padding: 0; overflow: hidden; }
-	
-	::-webkit-scrollbar { width: 6px; height: 6px; }
-	::-webkit-scrollbar-track { background: #f1f1f1; border-radius: 3px; }
-	::-webkit-scrollbar-thumb { background: #c5c5c5; border-radius: 3px; }
-	::-webkit-scrollbar-thumb:hover { background: #a8a8a8; }
-	.custom-scrollbar { scrollbar-width: thin; scrollbar-color: #c5c5c5 #f1f1f1; } 
-	
-	:global(.dark) ::-webkit-scrollbar-track { background: #2d3748; } 
-	:global(.dark) ::-webkit-scrollbar-thumb { background: #4a5568; } 
-	:global(.dark) ::-webkit-scrollbar-thumb:hover { background: #718096; } 
-	:global(.dark) .custom-scrollbar { scrollbar-color: #4a5568 #2d3748; }
+:root {
+    --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
 
-	.top-header {
-		position: fixed; top: 0; left: 0; right: 0; 
-		width: 100%; 
-		display: flex; align-items: center; justify-content: space-between;
-		padding: 0 1rem; height: 60px; z-index: 30; 
-		box-shadow: 0 1px 3px rgba(0,0,0,0.05);
-		transition: background-color 0.2s, border-color 0.2s;
-	}
-	.header-left { display: flex; align-items: center; gap: 0.75rem; }
-	.top-header .menu-btn {
-		background: none; border: none; cursor: pointer; padding: 0.5rem;
-		border-radius: 9999px; transition: background-color 0.15s ease;
-		display: flex; align-items: center; justify-content: center;
-	}
-	.top-header .menu-btn:hover { background-color: #f3f4f6; } 
-	:global(.dark) .top-header .menu-btn:hover { background-color: #374151; } 
-	.top-header .menu-btn svg { width: 1.5rem; height: 1.5rem; display: block; }
-	:global(.dark) .top-header .menu-btn svg { stroke: #d1d5db; } 
+    /* Refined Light Theme */
+    --light-bg-app: #F8F9FA; /* Page background */
+    --light-bg-content: #FFFFFF; /* Cards, Modals, Sidebar, Header */
+    --light-bg-hover: #E9ECEF; /* Hover for list items, buttons */
+    --light-bg-input: #FFFFFF;
+    --light-bg-backdrop: rgba(33, 37, 41, 0.6); /* Modal backdrop */
+    --light-bg-subtle: #F1F3F5; /* Subtle backgrounds like template step inputs */
+
+    --light-text-primary: #212529; /* Main text, headings */
+    --light-text-secondary: #495057; /* Secondary text, descriptions */
+    --light-text-tertiary: #868E96; /* Meta text, hints */
+    --light-text-placeholder: #ADB5BD;
+    --light-text-on-accent: #FFFFFF; /* Text on colored buttons */
+    --light-text-link: #007BFF;
+
+    --light-border-primary: #DEE2E6; /* Main borders for layout elements */
+    --light-border-secondary: #CED4DA; /* Borders for inputs, cards */
+    --light-border-focus: #80BDFF; /* Focus ring for inputs */
+    --light-border-dashed: #ADB5BD;
+
+    --light-accent-primary: #007BFF; /* Primary blue */
+    --light-accent-primary-hover: #0056b3;
+    --light-accent-primary-text: var(--light-text-link); /* For text links or icons needing this blue */
+
+    --light-accent-success: #28A745; /* Green */
+    --light-accent-success-hover: #1e7e34;
+    --light-accent-success-bg: #D4EDDA; /* Light green background for alerts */
+    --light-accent-success-border: #B8DFC2;
+    --light-accent-success-text: #155724;
+
+    --light-accent-danger: #DC3545; /* Red */
+    --light-accent-danger-hover: #c82333;
+    --light-accent-danger-bg: #F8D7DA; /* Light red background for alerts */
+    --light-accent-danger-border: #F1B0B7;
+    --light-accent-danger-text: #721c24;
+
+    --light-accent-info-bg: #E6F2FF; /* For icon wrappers */
+    --light-accent-info-icon: var(--light-accent-primary);
+
+    /* Dark Theme */
+    --dark-bg-app: #12181B; /* Darker page background */
+    --dark-bg-content: #1A2025; /* Cards, Modals, Sidebar, Header */
+    --dark-bg-hover: #2C343A; /* Hover for list items, buttons */
+    --dark-bg-input: #252B30;
+    --dark-bg-backdrop: rgba(10, 12, 14, 0.7);
+    --dark-bg-subtle: #20262B; /* Subtle backgrounds like template step inputs */
+
+    --dark-text-primary: #E8ECEF; /* Main text */
+    --dark-text-secondary: #B0B8BF; /* Secondary text */
+    --dark-text-tertiary: #7D8790; /* Meta text, hints */
+    --dark-text-placeholder: #6C757D;
+    --dark-text-on-accent: #FFFFFF;
+    --dark-text-link: #36A3FF;
+
+    --dark-border-primary: #303840; /* Main borders for layout elements */
+    --dark-border-secondary: #3E4850; /* Borders for inputs, cards */
+    --dark-border-focus: #36A3FF; /* Focus ring for inputs */
+    --dark-border-dashed: #505860;
+
+    --dark-accent-primary: #36A3FF; /* Primary blue for dark mode */
+    --dark-accent-primary-hover: #0B8EFF;
+    --dark-accent-primary-text: var(--dark-text-link);
+
+    --dark-accent-success: #34D399; /* Green */
+    --dark-accent-success-hover: #28B880;
+    --dark-accent-success-bg: rgba(52, 211, 153, 0.1);
+    --dark-accent-success-border: rgba(52, 211, 153, 0.3);
+    --dark-accent-success-text: #A7F3D0;
+
+    --dark-accent-danger: #F87171; /* Red */
+    --dark-accent-danger-hover: #F05252;
+    --dark-accent-danger-bg: rgba(248, 113, 113, 0.1);
+    --dark-accent-danger-border: rgba(248, 113, 113, 0.3);
+    --dark-accent-danger-text: #FDD8D8;
+
+    --dark-accent-info-bg: rgba(54, 163, 255, 0.15); /* For icon wrappers */
+    --dark-accent-info-icon: var(--dark-accent-primary);
+
+    /* Sizing & Spacing */
+    --space-0_5: 0.125rem; --space-1: 0.25rem; --space-1_5: 0.375rem; --space-2: 0.5rem;
+    --space-3: 0.75rem; --space-4: 1rem; --space-6: 1.5rem; --space-8: 2rem;
+    --space-10: 2.5rem; --space-12: 3rem;
+
+    /* Borders */
+    --rounded-sm: 0.2rem;
+    --rounded-md: 0.375rem; /* Standard border radius */
+    --rounded-lg: 0.5rem; /* For cards and modals */
+    --rounded-full: 9999px;
+
+    /* Shadows - Softer and more modern */
+    --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.03);
+    --shadow-md: 0 3px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
+    --shadow-lg: 0 8px 15px -3px rgba(0, 0, 0, 0.07), 0 4px 6px -2px rgba(0, 0, 0, 0.04);
+    --shadow-xl: 0 15px 25px -5px rgba(0, 0, 0, 0.08), 0 8px 10px -5px rgba(0, 0, 0, 0.04);
+    --shadow-focus-ring: 0 0 0 3px rgba(0, 123, 255, 0.25); /* For input focus, using primary accent */
+
+    /* Dark Shadows (can be more subtle or different color) */
+    --dark-shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.1);
+    --dark-shadow-md: 0 3px 6px -1px rgba(0, 0, 0, 0.15), 0 2px 4px -1px rgba(0, 0, 0, 0.1);
+    --dark-shadow-lg: 0 8px 15px -3px rgba(0, 0, 0, 0.2), 0 4px 6px -2px rgba(0, 0, 0, 0.15);
+    --dark-shadow-xl: 0 15px 25px -5px rgba(0, 0, 0, 0.25), 0 8px 10px -5px rgba(0, 0, 0, 0.2);
+    --dark-shadow-focus-ring: 0 0 0 3px rgba(54, 163, 255, 0.3);
 
 
-	.top-header .logo { display: flex; align-items: center; gap: 0.5rem; font-weight: 600; font-size: 1.125rem; text-decoration: none; }
-	.top-header .logo img { height: 2rem; width: auto; }
-	
-	.top-header .header-icons { display: flex; align-items: center; gap: 0.25rem; }
-	.top-header .header-icons button {
-		background: none; border: none; cursor: pointer; padding: 0.5rem;
-		line-height: 0; display: flex; align-items: center; justify-content: center;
-		border-radius: 9999px; width: 36px; height: 36px;
-		transition: background-color 0.15s ease;
-	}
-	.top-header .header-icons button:hover { background-color: #f3f4f6; } 
-	:global(.dark) .top-header .header-icons button:hover { background-color: #374151; } 
-	.top-header .header-icons svg { height: 1.25rem; width: 1.25rem; opacity: 0.9; }
-	:global(:not(.dark)) .top-header .header-icons svg { fill: #4b5563; } 
-	:global(.dark) .top-header .header-icons svg { fill: #d1d5db; } 
+    /* Transitions */
+    --transition-duration: 0.2s;
+    --transition-timing: ease-in-out;
+}
 
-	.relative { position: relative; }
-	.dropdown-window {
-		position: absolute; right: 0; top: calc(100% + 8px);
-		border-radius: 0.5rem; box-shadow: 0 4px 12px rgba(0,0,0,0.1);
-		padding: 0.75rem; width: 260px; z-index: 35; 
-		opacity: 0; transform: translateY(-5px) scale(0.98);
-		transition: opacity 0.15s ease-out, transform 0.15s ease-out, visibility 0s linear 0.15s;
-		pointer-events: none; visibility: hidden;
-	}
-	.dropdown-window:not(.hidden) { opacity: 1; transform: translateY(0) scale(1); pointer-events: auto; visibility: visible; transition-delay: 0s;}
-	.hidden { display: none !important; } 
+:global(body) {
+    font-family: var(--font-sans);
+    height: 100%; margin: 0; padding: 0; overflow: hidden;
+    background-color: var(--light-bg-app);
+    color: var(--light-text-primary);
+    transition: background-color var(--transition-duration) var(--transition-timing), color var(--transition-duration) var(--transition-timing);
+    font-size: 16px; /* Base font size */
+    line-height: 1.6;
+}
+:global(body.dark) {
+    background-color: var(--dark-bg-app);
+    color: var(--dark-text-primary);
+}
 
-	:global(aside nav a.bg-blue-600 svg), :global(aside nav a.bg-blue-700 svg) {
-		fill: white !important; 
-		stroke: white !important; 
-	}
-	:global(aside nav a.bg-blue-600 img), :global(aside nav a.bg-blue-700 img) { 
-		filter: brightness(0) invert(1);
-	}
-	:global(.dark aside nav a:not(.bg-blue-700) svg[stroke]) { stroke: #d1d5db; } 
-	:global(.dark aside nav a:not(.bg-blue-700) img) { filter: invert(0.8); }
-	:global(body:not(.dark) aside nav a:not(.bg-blue-600) img) { filter: none; }
+/* Scrollbar styles */
+:global(::-webkit-scrollbar) { width: 8px; height: 8px; }
+:global(::-webkit-scrollbar-track) { background: var(--light-bg-app); border-radius: 4px; }
+:global(::-webkit-scrollbar-thumb) { background: #bdc1c5; border-radius: 4px; }
+:global(::-webkit-scrollbar-thumb:hover) { background: #a8adb1; }
+.custom-scrollbar { scrollbar-width: thin; scrollbar-color: #bdc1c5 var(--light-bg-app); }
 
-	:global(.dark .bg-zinc-900) { background-color: #18181b; }
-	:global(.dark .text-zinc-300) { color: #d4d4d8; }
-	:global(.dark .bg-zinc-800) { background-color: #27272a; }
-	:global(.dark .border-zinc-700) { border-color: #3f3f46; }
-	:global(.dark .text-zinc-100) { color: #f4f4f5; }
-	:global(.dark .text-zinc-200) { color: #e4e4e7; }
-	:global(.dark .text-zinc-400) { color: #a1a1aa; }
-	:global(.dark .hover\:bg-zinc-700:hover) { background-color: #3f3f46; }
-	:global(.dark .bg-zinc-700) { background-color: #3f3f46; }
-	:global(.dark .border-zinc-600) { border-color: #52525b; }
-	:global(.dark .bg-zinc-600) { background-color: #52525b; }
-	:global(.dark .hover\:bg-zinc-600:hover) { background-color: #52525b; }
-	:global(.dark .hover\:bg-zinc-500:hover) { background-color: #71717a; }
-	
-	:global(.dark .bg-blue-700) { background-color: #2563eb; } 
-	:global(.dark .dark\:text-blue-400) { color: #60a5fa; }
-		
-	:global(.dark .dark\:hover\:bg-blue-700\/30:hover) { background-color: rgba(59, 130, 246, 0.3); }
+:global(body.dark ::-webkit-scrollbar-track) { background: var(--dark-bg-app); }
+:global(body.dark ::-webkit-scrollbar-thumb) { background: #4F5B64; }
+:global(body.dark ::-webkit-scrollbar-thumb:hover) { background: #606C76; }
+:global(body.dark) .custom-scrollbar { scrollbar-color: #4F5B64 var(--dark-bg-app); }
 
-	:global(.dark .bg-gray-100) { background-color: #18181b; } 
-	:global(.dark .text-gray-800) { color: #d4d4d8; } 
 
-	main {
-		padding-top: 60px; 
-	}
+.sr-only {
+    position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+    overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border-width: 0;
+}
+/* GENERAL LAYOUT */
+.app-layout { display: flex; height: 100vh; }
+.main-content-wrapper { flex: 1 1 0%; display: flex; flex-direction: column; overflow: hidden; }
+.main-area {
+    flex: 1 1 0%; /* Keeps its ability to be the main scrollable area */
+    display: flex; /* ADD this to make it a flex container */
+    flex-direction: column; /* ADD this to stack its children vertically */
+    overflow-x: hidden;
+    overflow-y: auto; /* Remains the primary scrollbar if content overflows */
+    padding: var(--space-6);
+    padding-top: calc(60px + var(--space-4));
+}
+.container {
+    margin-left: auto;
+    margin-right: auto;
+    max-width: 1280px;
+    padding: 0 var(--space-4);
+    display: flex; /* ADD this */
+    flex-direction: column; /* ADD this */
+    flex-grow: 1; /* ADD this - make the container fill the main-area's flex space */
+    width: 100%; /* Ensure it takes full width */
+}
+.workspace-section { margin-bottom: var(--space-12); }
+.template-section {
+    margin-top: var(--space-12);
+    display: flex; /* ADD this */
+    flex-direction: column; /* ADD this */
+    flex-grow: 1; /* ADD this - THIS IS THE KEY CHANGE for this section */
+    min-height: 0; /* ADD this - Important for flex children that might scroll */
+}
 
-	:global(.dark input[type="text"]), 
-	:global(.dark input[type="date"]), 
-	:global(.dark textarea) {
-		background-color: #3f3f46; 
-		border-color: #52525b;    
-		color: #f4f4f5;          
-	}
-	:global(.dark input::placeholder), 
-	:global(.dark textarea::placeholder) {
-		color: #a1a1aa; 
-	}
-	:global(.dark select) { 
-		background-color: #3f3f46;
-		border-color: #52525b;
-		color: #f4f4f5;
-	}
+/* Titles & Descriptions */
+.section-title {
+    font-size: 1.75rem; font-weight: 600;
+    color: var(--light-text-primary);
+    margin-bottom: var(--space-8);
+}
+:global(body.dark) .section-title { color: var(--dark-text-primary); }
+.sub-section-title {
+    font-size: 1.375rem; font-weight: 600;
+    color: var(--light-text-secondary);
+    margin-bottom: var(--space-4);
+}
+:global(body.dark) .sub-section-title { color: var(--dark-text-secondary); }
+.section-description {
+    font-size: 0.95rem;
+    color: var(--light-text-tertiary);
+    margin-bottom: var(--space-6);
+    max-width: 70ch; /* Improve readability */
+}
+:global(body.dark) .section-description { color: var(--dark-text-tertiary); }
 
-	:global(.dark .dark\:bg-blue-700\/30) {
-		background-color: rgba(37, 99, 235, 0.3) !important; 
-	}
-	:global(.dark .dark\:text-blue-400) {
-		color: #60a5fa !important;
-	}
+/* SIDEBAR */
+.sidebar {
+    position: fixed; top: 0; left: 0; height: 100%; width: 16rem;
+    box-shadow: var(--shadow-lg); z-index: 50;
+    display: flex; flex-direction: column; justify-content: space-between;
+    padding: var(--space-6) var(--space-4); /* More vertical padding */
+    border-right: 1px solid var(--light-border-primary);
+    background-color: var(--light-bg-content);
+    transition: background-color var(--transition-duration), border-color var(--transition-duration);
+}
+:global(body.dark) .sidebar {
+    background-color: var(--dark-bg-content);
+    border-color: var(--dark-border-primary);
+    box-shadow: var(--dark-shadow-lg);
+}
+.sidebar-header {
+    display: flex; align-items: center; gap: var(--space-3);
+    margin-bottom: var(--space-8); padding-bottom: var(--space-4);
+    border-bottom: 1px solid var(--light-border-primary);
+}
+:global(body.dark) .sidebar-header { border-color: var(--dark-border-primary); }
+.sidebar-logo-img { width: 2.25rem; height: 2.25rem; }
+.sidebar-title {
+    font-size: 1.375rem; font-weight: 700;
+    color: var(--light-text-primary);
+}
+:global(body.dark) .sidebar-title { color: var(--dark-text-primary); }
+.sidebar-nav { display: flex; flex-direction: column; gap: var(--space-1_5); } /* Slightly tighter gap */
+.nav-link {
+    display: flex; align-items: center; gap: var(--space-3);
+    padding: var(--space-2_5) var(--space-3); /* Slightly more padding */
+    border-radius: var(--rounded-md);
+    font-weight: 500; /* Medium weight for nav links */
+    transition: background-color var(--transition-duration), color var(--transition-duration);
+    text-decoration: none; color: var(--light-text-secondary);
+    letter-spacing: 0.01em;
+}
+.nav-link:hover { background-color: var(--light-bg-hover); color: var(--light-text-primary); }
+.nav-link.active {
+    background-color: var(--light-accent-primary);
+    color: var(--light-text-on-accent);
+    font-weight: 600; /* Bolder active link */
+}
+.nav-link .nav-link-icon, .nav-link .nav-link-icon-stroked {
+    width: 1.25rem; height: 1.25rem;
+    transition: fill var(--transition-duration), stroke var(--transition-duration);
+}
+.nav-link .nav-link-icon { fill: var(--light-text-tertiary); }
+.nav-link:hover .nav-link-icon { fill: var(--light-text-secondary); }
+.nav-link.active .nav-link-icon { fill: var(--light-text-on-accent); }
+.nav-link .nav-link-icon-stroked { stroke: var(--light-text-tertiary); fill: none; }
+.nav-link:hover .nav-link-icon-stroked { stroke: var(--light-text-secondary); }
+.nav-link.active .nav-link-icon-stroked { stroke: var(--light-text-on-accent); }
 
+:global(body.dark) .nav-link { color: var(--dark-text-secondary); }
+:global(body.dark) .nav-link:hover { background-color: var(--dark-bg-hover); color: var(--dark-text-primary); }
+:global(body.dark) .nav-link.active {
+    background-color: var(--dark-accent-primary);
+    color: var(--dark-text-on-accent);
+}
+:global(body.dark) .nav-link .nav-link-icon { fill: var(--dark-text-tertiary); }
+:global(body.dark) .nav-link:hover .nav-link-icon { fill: var(--dark-text-secondary); }
+:global(body.dark) .nav-link.active .nav-link-icon { fill: var(--dark-text-on-accent); }
+:global(body.dark) .nav-link .nav-link-icon-stroked { stroke: var(--dark-text-tertiary); }
+:global(body.dark) .nav-link:hover .nav-link-icon-stroked { stroke: var(--dark-text-secondary); }
+:global(body.dark) .nav-link.active .nav-link-icon-stroked { stroke: var(--dark-text-on-accent); }
+
+.logout-button {
+    display: flex; align-items: center; gap: var(--space-3);
+    padding: var(--space-2_5) var(--space-3); border-radius: var(--rounded-md);
+    font-weight: 500; width: 100%; margin-top: auto;
+    transition: background-color var(--transition-duration), color var(--transition-duration);
+    background-color: transparent; border: none; cursor: pointer; text-align: left;
+    color: var(--light-text-secondary);
+}
+.logout-button:hover { background-color: var(--light-bg-hover); color: var(--light-text-primary); }
+.logout-button .logout-button-icon { width: 1.25rem; height: 1.25rem; stroke: var(--light-text-tertiary); }
+.logout-button:hover .logout-button-icon { stroke: var(--light-text-secondary); }
+:global(body.dark) .logout-button { color: var(--dark-text-secondary); }
+:global(body.dark) .logout-button:hover { background-color: var(--dark-bg-hover); color: var(--dark-text-primary); }
+:global(body.dark) .logout-button .logout-button-icon { stroke: var(--dark-text-tertiary); }
+:global(body.dark) .logout-button:hover .logout-button-icon { stroke: var(--dark-text-secondary); }
+.sidebar-overlay {
+    position: fixed; top: 0; right: 0; bottom: 0; left: 0;
+    background-color: var(--light-bg-backdrop); opacity: 1; /* backdrop-filter for blur if desired */
+    z-index: 40;
+}
+:global(body.dark) .sidebar-overlay { background-color: var(--dark-bg-backdrop); }
+@media (min-width: 768px) {
+    /* .top-header .menu-btn { display: none; }  <-- Ensure this is commented or gone */
+}
+
+/* HEADER */
+.top-header {
+    position: fixed; top: 0; left: 0; right: 0; width: 100%;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0 var(--space-4); height: 60px; z-index: 30;
+    box-shadow: var(--shadow-md); /* Softer shadow */
+    transition: background-color var(--transition-duration), border-color var(--transition-duration);
+    background-color: var(--light-bg-content);
+    border-bottom: 1px solid var(--light-border-primary);
+}
+:global(body.dark) .top-header {
+    background-color: var(--dark-bg-content);
+    border-bottom-color: var(--dark-border-primary);
+    box-shadow: var(--dark-shadow-md);
+}
+.header-left { display: flex; align-items: center; gap: var(--space-3); }
+.top-header .menu-btn {
+    background: none; border: none; cursor: pointer; padding: var(--space-2);
+    border-radius: var(--rounded-md); transition: background-color var(--transition-duration);
+    display: flex; align-items: center; justify-content: center;
+}
+.top-header .menu-btn:hover { background-color: var(--light-bg-hover); }
+:global(body.dark) .top-header .menu-btn:hover { background-color: var(--dark-bg-hover); }
+.top-header .menu-btn svg { width: 1.5rem; height: 1.5rem; display: block; stroke: var(--light-text-secondary); }
+:global(body.dark) .top-header .menu-btn svg { stroke: var(--dark-text-secondary); }
+
+
+.top-header .logo { display: none; align-items: center; gap: var(--space-2); font-weight: 600; font-size: 1.25rem; text-decoration: none; }
+@media (min-width: 768px) { .top-header .logo { display: flex; } }
+.top-header .logo img { height: 2.25rem; width: auto; }
+.top-header .logo span { color: var(--light-text-primary); }
+:global(body.dark) .top-header .logo span { color: var(--dark-text-primary); }
+.header-page-title {
+    font-size: 1.375rem; font-weight: 600;
+    margin-left: var(--space-2); color: var(--light-text-primary);
+}
+:global(body.dark) .header-page-title { color: var(--dark-text-primary); }
+@media (min-width: 768px) { .header-page-title { margin-left: 0; } }
+
+.header-icons { display: flex; align-items: center; gap: var(--space-1_5); } /* Slightly more gap */
+.header-icons button {
+    background: none; border: none; cursor: pointer; padding: var(--space-2);
+    line-height: 0; display: flex; align-items: center; justify-content: center;
+    border-radius: var(--rounded-md); width: 40px; height: 40px; /* Slightly larger touch target */
+    transition: background-color var(--transition-duration);
+}
+.header-icons button:hover { background-color: var(--light-bg-hover); }
+:global(body.dark) .header-icons button:hover { background-color: var(--dark-bg-hover); }
+.header-icons svg { height: 1.375rem; width: 1.375rem; opacity: 1; fill: var(--light-text-secondary); }
+:global(body.dark) .header-icons svg { fill: var(--dark-text-secondary); }
+
+.relative { position: relative; }
+.dropdown-window {
+    position: absolute; right: 0; top: calc(100% + 10px); /* More space */
+    border-radius: var(--rounded-lg); box-shadow: var(--shadow-lg);
+    padding: var(--space-4); width: 280px; z-index: 35;
+    opacity: 0; transform: translateY(-5px) scale(0.98);
+    transition: opacity var(--transition-duration), transform var(--transition-duration), visibility 0s linear var(--transition-duration);
+    pointer-events: none; visibility: hidden;
+    background-color: var(--light-bg-content);
+    border: 1px solid var(--light-border-primary);
+    color: var(--light-text-secondary);
+}
+.dropdown-window:not(.dropdown-window-hidden) { opacity: 1; transform: translateY(0) scale(1); pointer-events: auto; visibility: visible; transition-delay: 0s;}
+.dropdown-window-hidden { display: none !important; }
+:global(body.dark) .dropdown-window {
+    background-color: var(--dark-bg-content);
+    border-color: var(--dark-border-primary);
+    color: var(--dark-text-secondary);
+    box-shadow: var(--dark-shadow-lg);
+}
+.dropdown-window h3 { font-weight: 600; margin-bottom: var(--space-3); font-size: 0.95rem; color: var(--light-text-primary); }
+:global(body.dark) .dropdown-window h3 { color: var(--dark-text-primary); }
+.dropdown-window p, .dropdown-window li { font-size: 0.875rem; color: var(--light-text-secondary); }
+:global(body.dark) .dropdown-window p, :global(body.dark) .dropdown-window li { color: var(--dark-text-secondary); }
+.dropdown-list { list-style: disc; list-style-position: inside; margin-left: var(--space-1_5); }
+.dropdown-list li { margin-bottom: var(--space-1); }
+.dropdown-support-link {
+    font-size: 0.875rem; color: var(--light-text-link);
+    text-decoration: none; margin-top: var(--space-2); display: block;
+}
+.dropdown-support-link:hover { text-decoration: underline; }
+:global(body.dark) .dropdown-support-link { color: var(--dark-text-link); }
+
+.profile-welcome-msg { font-size: 0.875rem; margin-bottom: var(--space-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dropdown-link, .dropdown-button-danger {
+    display: block; font-size: 0.875rem; font-weight: 500;
+    padding: var(--space-2_5) var(--space-3);
+    border-radius: var(--rounded-md); width: 100%; text-align: left;
+    margin-bottom: var(--space-1_5);
+    transition: background-color var(--transition-duration), color var(--transition-duration);
+    text-decoration: none; border: none; cursor: pointer;
+}
+.dropdown-link { background-color: var(--light-bg-hover); color: var(--light-text-secondary); }
+.dropdown-link:hover { background-color: var(--light-border-primary); color: var(--light-text-primary); }
+:global(body.dark) .dropdown-link { background-color: var(--dark-bg-hover); color: var(--dark-text-secondary); }
+:global(body.dark) .dropdown-link:hover { background-color: var(--dark-border-primary); color: var(--dark-text-primary); }
+
+.dropdown-button-danger { background-color: var(--light-accent-danger-bg); color: var(--light-accent-danger-text); }
+.dropdown-button-danger:hover { background-color: var(--light-accent-danger); color: var(--light-text-on-accent); }
+:global(body.dark) .dropdown-button-danger { background-color: var(--dark-accent-danger-bg); color: var(--dark-accent-danger-text); }
+:global(body.dark) .dropdown-button-danger:hover { background-color: var(--dark-accent-danger); color: var(--dark-text-on-accent); }
+#darkModeToggle { margin-left: var(--space-2); }
+
+/* ALERTS */
+.alert {
+    margin: var(--space-4); padding: var(--space-4);
+    border-width: 1px; border-style: solid;
+    border-radius: var(--rounded-lg); position: relative;
+    box-shadow: var(--shadow-sm);
+    font-size: 0.95rem;
+}
+.alert-error {
+    background-color: var(--light-accent-error-bg);
+    border-color: var(--light-accent-danger-border);
+    color: var(--light-accent-danger-text);
+}
+.alert-success {
+    background-color: var(--light-accent-success-bg);
+    border-color: var(--light-accent-success-border);
+    color: var(--light-accent-success-text);
+}
+:global(body.dark) .alert-error {
+    background-color: var(--dark-accent-error-bg);
+    border-color: var(--dark-accent-danger-border);
+    color: var(--dark-accent-danger-text);
+    box-shadow: var(--dark-shadow-sm);
+}
+:global(body.dark) .alert-success {
+    background-color: var(--dark-accent-success-bg);
+    border-color: var(--dark-accent-success-border);
+    color: var(--dark-accent-success-text);
+    box-shadow: var(--dark-shadow-sm);
+}
+.alert strong { font-weight: 600; }
+.alert-close-button {
+    position: absolute; top: var(--space-2); bottom: 0; right: var(--space-2);
+    padding: var(--space-1) var(--space-2); line-height: 1;
+    background: none; border: none; cursor: pointer; color: inherit; opacity: 0.7;
+}
+.alert-close-button:hover { opacity: 1; }
+.alert-close-icon { font-size: 1.5rem; line-height: 1; }
+
+/* WORKSPACE & TEMPLATE CARDS */
+.workspace-grid, .template-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: var(--space-6);
+    flex-grow: 1; /* ADD this - make the grid expand within the template-section */
+    /* If you want the grid itself to scroll if it has too many items and template-section has a fixed height
+       you might add overflow-y: auto; here. But for now, letting main-area scroll is fine. */
+}
+
+.board-card, .template-card {
+    background-color: var(--light-bg-content);
+    border-radius: var(--rounded-lg);
+    box-shadow: var(--shadow-md);
+    transition: box-shadow var(--transition-duration), transform var(--transition-duration);
+    padding: var(--space-6);
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    /* flex-basis: auto; /* Or a specific min-height if you want all cards to be same height initially */
+    /* You might want to add a min-height to template-card if the grid is too sparse */
+    /* min-height: 350px; /* Example: Adjust as needed */
+}
+.board-card:hover, .template-card:hover { box-shadow: var(--shadow-lg); transform: translateY(-3px); }
+:global(body.dark) .board-card, :global(body.dark) .template-card {
+    background-color: var(--dark-bg-content);
+    box-shadow: var(--dark-shadow-md);
+}
+:global(body.dark) .board-card:hover, :global(body.dark) .template-card:hover { box-shadow: var(--dark-shadow-lg); }
+
+.board-card { text-decoration: none; }
+.board-card-title {
+    font-size: 1.25rem; font-weight: 600;
+    color: var(--light-accent-primary-text);
+    margin-bottom: var(--space-2);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+:global(body.dark) .board-card-title { color: var(--dark-accent-primary-text); }
+.board-card-meta { font-size: 0.8rem; color: var(--light-text-tertiary); }
+:global(body.dark) .board-card-meta { color: var(--dark-text-tertiary); }
+.board-card-delete-btn {
+    position: absolute; top: var(--space-3); right: var(--space-3); /* Adjusted padding */
+    padding: var(--space-1_5); border-radius: var(--rounded-md);
+    transition: color var(--transition-duration), background-color var(--transition-duration);
+    color: var(--light-text-tertiary);
+    background-color: transparent; border: none; cursor: pointer; line-height: 1;
+}
+.board-card-delete-btn:hover:not(:disabled) {
+    background-color: var(--light-accent-danger-bg);
+    color: var(--light-accent-danger-text);
+}
+.board-card-delete-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+:global(body.dark) .board-card-delete-btn { color: var(--dark-text-tertiary); }
+:global(body.dark) .board-card-delete-btn:hover:not(:disabled) {
+    background-color: var(--dark-accent-danger-bg);
+    color: var(--dark-accent-danger-text);
+}
+.board-card-delete-btn .icon-sm, .board-card-delete-btn .spinner {
+    width: 1rem; height: 1rem; display: inline-block; vertical-align: middle;
+}
+
+.add-workspace-card {
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    background-color: var(--light-bg-content);
+    border: 2px dashed var(--light-border-dashed);
+    border-radius: var(--rounded-lg); box-shadow: var(--shadow-sm);
+    transition: all var(--transition-duration);
+    padding: var(--space-6); color: var(--light-text-tertiary);
+    min-height: 150px; cursor: pointer; text-align: center;
+}
+.add-workspace-card:hover {
+    box-shadow: var(--shadow-md);
+    border-color: var(--light-accent-primary);
+    color: var(--light-accent-primary);
+    transform: translateY(-2px);
+}
+:global(body.dark) .add-workspace-card {
+    background-color: var(--dark-bg-content);
+    border-color: var(--dark-border-dashed);
+    color: var(--dark-text-tertiary);
+    box-shadow: var(--dark-shadow-sm);
+}
+:global(body.dark) .add-workspace-card:hover {
+    border-color: var(--dark-accent-primary);
+    color: var(--dark-accent-primary);
+    box-shadow: var(--dark-shadow-md);
+}
+.add-workspace-card .icon-lg { width: 2.5rem; height: 2.5rem; margin-bottom: var(--space-3); fill: currentColor; }
+.add-workspace-card .text-sm { font-size: 0.9rem; }
+.add-workspace-card .font-medium { font-weight: 500; }
+
+.empty-state-workspaces {
+    text-align: center; padding: var(--space-10) var(--space-6);
+    background-color: var(--light-bg-content);
+    border-radius: var(--rounded-lg); box-shadow: var(--shadow-md);
+}
+:global(body.dark) .empty-state-workspaces { background-color: var(--dark-bg-content); box-shadow: var(--dark-shadow-md); }
+.empty-state-workspaces .icon-xl {
+    width: 4.5rem; height: 4.5rem; color: var(--light-text-placeholder);
+    margin: 0 auto var(--space-6); fill: currentColor;
+}
+:global(body.dark) .empty-state-workspaces .icon-xl { color: var(--dark-text-tertiary); }
+.empty-state-workspaces h3 {
+    font-size: 1.5rem; font-weight: 600;
+    color: var(--light-text-primary); margin-bottom: var(--space-3);
+}
+:global(body.dark) .empty-state-workspaces h3 { color: var(--dark-text-primary); }
+.empty-state-workspaces p { color: var(--light-text-secondary); margin-bottom: var(--space-6); line-height: 1.7; }
+:global(body.dark) .empty-state-workspaces p { color: var(--dark-text-secondary); }
+
+
+.template-card-header { display: flex; align-items: center; margin-bottom: var(--space-4); }
+.template-card-icon-wrapper {
+    padding: var(--space-2_5); /* Slightly larger padding */
+    background-color: var(--light-accent-info-bg);
+    border-radius: var(--rounded-full); margin-right: var(--space-3);
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 44px; height: 44px; /* Fixed size */
+}
+.template-card-icon-wrapper svg { width: 1.5rem; height: 1.5rem; color: var(--light-accent-info-icon); fill: currentColor; }
+:global(body.dark) .template-card-icon-wrapper { background-color: var(--dark-accent-info-bg); }
+:global(body.dark) .template-card-icon-wrapper svg { color: var(--dark-accent-info-icon); }
+.template-card-title { font-size: 1.25rem; font-weight: 600; color: var(--light-text-primary); }
+:global(body.dark) .template-card-title { color: var(--dark-text-primary); }
+.template-card-goal { font-size: 0.9rem; color: var(--light-text-secondary); margin-bottom: var(--space-3); }
+.template-card-goal strong { font-weight: 500; color: var(--light-text-primary); }
+:global(body.dark) .template-card-goal { color: var(--dark-text-secondary); }
+:global(body.dark) .template-card-goal strong { color: var(--dark-text-primary); }
+.template-card-steps {
+    list-style-type: disc; list-style-position: inside;
+    font-size: 0.875rem; color: var(--light-text-tertiary);
+    margin-bottom: var(--space-4); flex-grow: 1; padding-left: var(--space-1_5);
+}
+.template-card-steps li { margin-bottom: var(--space-1_5); }
+:global(body.dark) .template-card-steps { color: var(--dark-text-tertiary); }
+.template-card-button { margin-top: auto; width: 100%; }
+
+/* FOOTER */
+.app-footer {
+    text-align: center; padding: var(--space-6);
+    font-size: 0.875rem; color: var(--light-text-tertiary);
+    border-top: 1px solid var(--light-border-primary);
+}
+:global(body.dark) .app-footer {
+    color: var(--dark-text-tertiary);
+    border-top-color: var(--dark-border-primary);
+}
+
+/* MODALS */
+.modal-overlay {
+    position: fixed; inset: 0; z-index: 100;
+    display: flex; align-items: center; justify-content: center;
+    background-color: var(--light-bg-backdrop);
+    padding: var(--space-4);
+    backdrop-filter: blur(3px);
+}
+:global(body.dark) .modal-overlay { background-color: var(--dark-bg-backdrop); }
+.modal-content {
+    background-color: var(--light-bg-content);
+    padding: var(--space-8); border-radius: var(--rounded-lg); /* More padding */
+    box-shadow: var(--shadow-xl); width: 100%; max-width: 32rem; /* Slightly wider for some modals */
+    display: flex; flex-direction: column;
+    max-height: 90vh; /* ensure modal fits in viewport */
+}
+:global(body.dark) .modal-content {
+    background-color: var(--dark-bg-content);
+    box-shadow: var(--dark-shadow-xl);
+}
+.modal-header {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-bottom: var(--space-6); padding-bottom: var(--space-4);
+    border-bottom: 1px solid var(--light-border-primary);
+}
+:global(body.dark) .modal-header { border-bottom-color: var(--dark-border-primary); }
+.modal-title { font-size: 1.5rem; font-weight: 600; color: var(--light-text-primary); }
+:global(body.dark) .modal-title { color: var(--dark-text-primary); }
+.modal-close-button {
+    color: var(--light-text-tertiary);
+    transition: color var(--transition-duration);
+    background: none; border: none; cursor: pointer; padding: 0; line-height: 1;
+    font-size: 1.75rem; /* Larger close icon */
+}
+.modal-close-button:hover { color: var(--light-text-secondary); }
+:global(body.dark) .modal-close-button { color: var(--dark-text-tertiary); }
+:global(body.dark) .modal-close-button:hover { color: var(--dark-text-secondary); }
+
+.modal-form-group { margin-bottom: var(--space-4); }
+.modal-label {
+    display: block; font-size: 0.9rem; font-weight: 500;
+    color: var(--light-text-secondary); margin-bottom: var(--space-2);
+}
+.modal-label .required-asterisk { color: var(--light-accent-danger); margin-left: var(--space-0_5); }
+:global(body.dark) .modal-label { color: var(--dark-text-secondary); }
+.modal-input, .modal-textarea {
+    width: 100%; padding: var(--space-2_5) var(--space-3); /* Consistent padding */
+    border: 1px solid var(--light-border-secondary);
+    border-radius: var(--rounded-md); box-shadow: var(--shadow-sm);
+    background-color: var(--light-bg-input); color: var(--light-text-primary);
+    transition: border-color var(--transition-duration), box-shadow var(--transition-duration);
+    font-size: 0.95rem;
+}
+.modal-textarea { line-height: 1.5; min-height: 80px; }
+.modal-input:focus, .modal-textarea:focus {
+    outline: none; border-color: var(--light-accent-primary);
+    box-shadow: var(--shadow-focus-ring);
+}
+:global(body.dark) .modal-input, :global(body.dark) .modal-textarea {
+    background-color: var(--dark-bg-input);
+    border-color: var(--dark-border-secondary);
+    color: var(--dark-text-primary);
+    box-shadow: var(--dark-shadow-sm);
+}
+:global(body.dark) .modal-input::placeholder, :global(body.dark) .modal-textarea::placeholder { color: var(--dark-text-placeholder); }
+:global(body.dark) .modal-input:focus, :global(body.dark) .modal-textarea:focus {
+    border-color: var(--dark-accent-primary);
+    box-shadow: var(--dark-shadow-focus-ring);
+}
+.form-action-error, .form-success-message { font-size: 0.875rem; margin-bottom: var(--space-3); padding: var(--space-2) var(--space-3); border-radius: var(--rounded-md); }
+.form-action-error { color: var(--light-accent-danger-text); background-color: var(--light-accent-danger-bg); border: 1px solid var(--light-accent-danger-border); }
+:global(body.dark) .form-action-error { color: var(--dark-accent-danger-text); background-color: var(--dark-accent-danger-bg); border-color: var(--dark-accent-danger-border); }
+.form-success-message { color: var(--light-accent-success-text); background-color: var(--light-accent-success-bg); border: 1px solid var(--light-accent-success-border); }
+:global(body.dark) .form-success-message { color: var(--dark-accent-success-text); background-color: var(--dark-accent-success-bg); border-color: var(--dark-accent-success-border); }
+.modal-actions { display: flex; justify-content: flex-end; gap: var(--space-3); margin-top: var(--space-6); }
+
+/* General Button Styles */
+.button {
+    padding: var(--space-2_5) var(--space-4); font-size: 0.9rem; font-weight: 500;
+    border-radius: var(--rounded-md); border: 1px solid transparent;
+    transition: background-color var(--transition-duration), border-color var(--transition-duration), color var(--transition-duration), box-shadow var(--transition-duration), transform var(--transition-duration);
+    cursor: pointer; display: inline-flex; align-items: center; justify-content: center;
+    line-height: 1.5; text-decoration: none;
+    box-shadow: var(--shadow-sm);
+}
+.button:hover:not(:disabled) { transform: translateY(-1px); box-shadow: var(--shadow-md); }
+.button:active:not(:disabled) { transform: translateY(0px); box-shadow: var(--shadow-sm); }
+.button:disabled { opacity: 0.6; cursor: not-allowed; box-shadow: none !important; transform: none !important; }
+.button-spinner { animation: spin 1s linear infinite; margin-right: 0.5rem; width: 1rem; height: 1rem; }
+@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+
+.button-default {
+    color: var(--light-text-secondary);
+    background-color: var(--light-bg-hover);
+    border-color: var(--light-border-secondary);
+}
+.button-default:hover:not(:disabled) { background-color: var(--light-border-primary); color: var(--light-text-primary); }
+:global(body.dark) .button-default {
+    color: var(--dark-text-secondary);
+    background-color: var(--dark-bg-hover);
+    border-color: var(--dark-border-secondary);
+}
+:global(body.dark) .button-default:hover:not(:disabled) { background-color: var(--dark-border-primary); color: var(--dark-text-primary); }
+
+.button-primary { color: var(--light-text-on-accent); background-color: var(--light-accent-primary); }
+.button-primary:hover:not(:disabled) { background-color: var(--light-accent-primary-hover); }
+.button-primary:focus-visible { outline: none; box-shadow: var(--shadow-sm), var(--shadow-focus-ring); }
+:global(body.dark) .button-primary { background-color: var(--dark-accent-primary); }
+:global(body.dark) .button-primary:hover:not(:disabled) { background-color: var(--dark-accent-primary-hover); }
+:global(body.dark) .button-primary:focus-visible { box-shadow: var(--dark-shadow-sm), var(--dark-shadow-focus-ring); }
+
+.button-danger { color: var(--light-text-on-accent); background-color: var(--light-accent-danger); }
+.button-danger:hover:not(:disabled) { background-color: var(--light-accent-danger-hover); }
+.button-danger:focus-visible { outline: none; box-shadow: var(--shadow-sm), 0 0 0 3px rgba(220, 53, 69, 0.25); }
+:global(body.dark) .button-danger { background-color: var(--dark-accent-danger); }
+:global(body.dark) .button-danger:hover:not(:disabled) { background-color: var(--dark-accent-danger-hover); }
+:global(body.dark) .button-danger:focus-visible { box-shadow: var(--dark-shadow-sm), 0 0 0 3px rgba(248, 113, 113, 0.3); }
+
+.button-success { color: var(--light-text-on-accent); background-color: var(--light-accent-success); }
+.button-success:hover:not(:disabled) { background-color: var(--light-accent-success-hover); }
+.button-success:focus-visible { outline: none; box-shadow: var(--shadow-sm), 0 0 0 3px rgba(40, 167, 69, 0.25); }
+:global(body.dark) .button-success { background-color: var(--dark-accent-success); }
+:global(body.dark) .button-success:hover:not(:disabled) { background-color: var(--dark-accent-success-hover); }
+:global(body.dark) .button-success:focus-visible { box-shadow: var(--dark-shadow-sm), 0 0 0 3px rgba(52, 211, 153, 0.3); }
+
+/* Delete Modal Specifics */
+.modal-title-danger { color: var(--light-accent-danger); }
+:global(body.dark) .modal-title-danger { color: var(--dark-accent-danger); }
+.modal-text-confirm { color: var(--light-text-secondary); margin-bottom: var(--space-2); font-size: 1rem; }
+:global(body.dark) .modal-text-confirm { color: var(--dark-text-secondary); }
+.modal-text-warning {
+    font-size: 0.9rem; color: var(--light-accent-danger-text);
+    background-color: var(--light-accent-danger-bg);
+    border: 1px solid var(--light-accent-danger-border);
+    padding: var(--space-3); border-radius: var(--rounded-md);
+    margin-bottom: var(--space-6);
+}
+:global(body.dark) .modal-text-warning {
+    color: var(--dark-accent-danger-text);
+    background-color: var(--dark-accent-danger-bg);
+    border-color: var(--dark-accent-danger-border);
+}
+
+/* Template Usage Modal Specifics */
+.modal-content-large { max-width: 40rem; } /* Wider for template modal */
+.modal-form-flex-grow { display: flex; flex-direction: column; flex-grow: 1; overflow: hidden; }
+.modal-form-scrollable { overflow-y: auto; padding-right: var(--space-2); flex-grow: 1; margin-bottom: var(--space-4); }
+.template-modal-goal { font-size: 0.95rem; color: var(--light-text-secondary); margin-bottom: var(--space-4); }
+.template-modal-goal strong { font-weight: 500; color: var(--light-text-primary); }
+:global(body.dark) .template-modal-goal { color: var(--dark-text-secondary); }
+:global(body.dark) .template-modal-goal strong { color: var(--dark-text-primary); }
+.date-input-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: var(--space-4); margin-bottom: var(--space-4); }
+.input-hint { font-size: 0.8rem; color: var(--light-text-tertiary); margin-top: var(--space-1_5); }
+:global(body.dark) .input-hint { color: var(--dark-text-tertiary); }
+.modal-divider { margin: var(--space-6) 0; border: 0; border-top: 1px solid var(--light-border-primary); }
+:global(body.dark) .modal-divider { border-top-color: var(--dark-border-primary); }
+.ai-prompt-section-title { font-size: 1rem; font-weight: 500; color: var(--light-text-secondary); margin-bottom: var(--space-3); }
+:global(body.dark) .ai-prompt-section-title { color: var(--dark-text-secondary); }
+.step-input-container {
+    margin-bottom: var(--space-4); padding: var(--space-4);
+    background-color: var(--light-bg-subtle);
+    border-radius: var(--rounded-md); border: 1px solid var(--light-border-primary);
+}
+:global(body.dark) .step-input-container {
+    background-color: var(--dark-bg-subtle);
+    border-color: var(--dark-border-primary);
+}
+.step-input-label { display: block; font-size: 0.9rem; font-weight: 500; color: var(--light-text-secondary); margin-bottom: var(--space-2); }
+:global(body.dark) .step-input-label { color: var(--dark-text-secondary); }
+.step-input-hint { font-size: 0.8rem; color: var(--light-text-tertiary); margin-top: var(--space-1_5); }
+.step-input-hint em { font-style: italic; color: var(--light-text-primary); }
+:global(body.dark) .step-input-hint { color: var(--dark-text-tertiary); }
+:global(body.dark) .step-input-hint em { color: var(--dark-text-primary); }
+
+.modal-footer-actions {
+    padding-top: var(--space-6); border-top: 1px solid var(--light-border-primary);
+    flex-shrink: 0; display: flex; justify-content: flex-end; gap: var(--space-3);
+}
+:global(body.dark) .modal-footer-actions { border-top-color: var(--dark-border-primary); }
+
+/* Icon Helpers */
+.icon-sm { width: 1rem; height: 1rem; fill: currentColor; }
+.icon-md { width: 1.25rem; height: 1.25rem; fill: currentColor; }
+.icon-lg { width: 2rem; height: 2rem; fill: currentColor; }
+.icon-xl { width: 4rem; height: 4rem; fill: currentColor; }
+.sidebar {
+    position: fixed; top: 0; left: 0;
+    height: 100%; width: 16rem; /* w-64 */
+    box-shadow: var(--shadow-lg);
+    z-index: 50;
+    display: flex; flex-direction: column; justify-content: space-between;
+    padding: var(--space-4);
+    border-right-width: 1px; border-style: solid;
+    background-color: var(--light-bg-content); /* Was --light-bg-secondary */
+    border-color: var(--light-border-primary);
+    transition: background-color var(--transition-duration) var(--transition-timing), border-color var(--transition-duration) var(--transition-timing);
+}
+:global(body.dark) .sidebar {
+    background-color: var(--dark-bg-content); /* Was --dark-bg-secondary */
+    border-color: var(--dark-border-primary);
+    box-shadow: var(--dark-shadow-lg); /* Added for dark mode consistency */
+}
+.sidebar-header {
+    display: flex; align-items: center;
+    gap: var(--space-2);
+    margin-bottom: var(--space-8);
+    padding-bottom: var(--space-4);
+    border-bottom-width: 1px; border-style: solid;
+    border-color: var(--light-border-primary);
+}
+:global(body.dark) .sidebar-header {
+    border-color: var(--dark-border-primary);
+}
+.sidebar-logo-img { width: 2rem; height: 2rem; } /* w-8 h-8 */
+.sidebar-title {
+    font-size: 1.25rem; line-height: 1.75rem; /* text-xl */
+    font-weight: 700; /* font-bold */
+    color: var(--light-text-primary);
+}
+:global(body.dark) .sidebar-title { color: var(--dark-text-primary); }
+.sidebar-nav { display: flex; flex-direction: column; gap: var(--space-2); }
+.nav-link {
+    display: flex; align-items: center;
+    gap: var(--space-3); /* gap-3 */
+    padding: var(--space-2) var(--space-3); /* px-3 py-2 */
+    border-radius: var(--rounded-md);
+    font-weight: 600; /* font-semibold */
+    transition: background-color var(--transition-duration) var(--transition-timing), color var(--transition-duration) var(--transition-timing);
+    text-decoration: none;
+    color: var(--light-text-secondary);
+}
+/* Specific hover and active states from home page example */
+.nav-link:hover {
+    background-color: var(--light-bg-hover); /* Matches hover:bg-gray-100 */
+    /* color: var(--light-text-primary); Implicit from theme, but can be explicit */
+}
+.nav-link.active { /* This logic is complex with Tailwind, map to simple active state */
+    background-color: var(--light-accent-primary); /* Matches bg-blue-600 */
+    color: var(--light-text-on-accent); /* Matches text-white */
+}
+:global(body.dark) .nav-link {
+    color: var(--dark-text-secondary); /* Matches text-zinc-300 */
+}
+:global(body.dark) .nav-link:hover {
+    background-color: var(--dark-bg-hover); /* Matches hover:bg-zinc-700 */
+}
+:global(body.dark) .nav-link.active {
+    background-color: var(--dark-accent-primary-active); /* Matches bg-blue-800 in dark mode example */
+    color: var(--dark-text-on-accent); /* Matches text-white */
+}
+
+.nav-link .nav-link-icon { width: 1.25rem; height: 1.25rem; fill: currentColor; } /* w-5 h-5 */
+.nav-link .nav-link-icon-stroked { width: 1.25rem; height: 1.25rem; stroke: currentColor; fill: none; }
+
+/* Ensure active link icons are white */
+.nav-link.active .nav-link-icon,
+.nav-link.active .nav-link-icon-stroked {
+    fill: var(--light-text-on-accent); /* For filled icons */
+    stroke: var(--light-text-on-accent); /* For stroked icons */
+}
+/* Default icon colors (non-active) */
+:global(body:not(.dark)) .nav-link:not(.active) .nav-link-icon { fill: var(--light-text-secondary); }
+:global(body:not(.dark)) .nav-link:not(.active) .nav-link-icon-stroked { stroke: var(--light-text-secondary); }
+:global(body.dark) .nav-link:not(.active) .nav-link-icon { fill: var(--dark-text-secondary); }
+:global(body.dark) .nav-link:not(.active) .nav-link-icon-stroked { stroke: var(--dark-text-secondary); }
+
+
+.logout-button {
+    display: flex; align-items: center;
+    gap: var(--space-3); /* gap-3 */
+    padding: var(--space-2) var(--space-3); /* px-3 py-2 */
+    border-radius: var(--rounded-md);
+    font-weight: 600; /* font-semibold */
+    width: 100%; /* w-full */
+    margin-top: auto; /* mt-auto */
+    transition: background-color var(--transition-duration) var(--transition-timing), color var(--transition-duration) var(--transition-timing);
+    background-color: transparent; border: none; cursor: pointer; text-align: left;
+    color: var(--light-text-secondary);
+}
+.logout-button:hover {
+    background-color: var(--light-bg-hover); /* Matches hover:bg-gray-100 */
+}
+.logout-button .logout-button-icon {
+    width: 1.25rem; height: 1.25rem; /* w-5 h-5 */
+    stroke: var(--light-text-secondary); /* Matches text-gray-700 for stroke */
+}
+:global(body.dark) .logout-button {
+    color: var(--dark-text-secondary); /* Matches text-zinc-300 */
+}
+:global(body.dark) .logout-button:hover {
+    background-color: var(--dark-bg-hover); /* Matches hover:bg-zinc-700 */
+}
+:global(body.dark) .logout-button .logout-button-icon {
+    stroke: var(--dark-text-secondary); /* Matches text-zinc-300 for stroke */
+}
+
+.sidebar-overlay {
+    position: fixed; top: 0; right: 0; bottom: 0; left: 0;
+    background-color: var(--light-bg-backdrop); opacity: 1; /* backdrop-filter for blur if desired */
+    z-index: 40;
+}
+:global(body.dark) .sidebar-overlay { background-color: var(--dark-bg-backdrop); }
+@media (min-width: 768px) { .sidebar-overlay { display: none; } } /* md:hidden */
 </style>
