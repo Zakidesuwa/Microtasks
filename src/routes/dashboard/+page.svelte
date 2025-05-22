@@ -499,10 +499,6 @@
                 </div>
 			{/if}
 		</main>
-
-		<footer class="page-footer text-center p-4 text-sm border-t flex-shrink-0">
-			Microtask © {new Date().getFullYear()}
-		</footer>
 	</div>
 </div>
 
