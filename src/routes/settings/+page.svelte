@@ -2,11 +2,11 @@
   // Common Svelte and Sapper/Kit imports
   import { onMount, onDestroy } from 'svelte';
   import { page } from '$app/stores';
-  import { enhance } from '$app/forms'; // If settings page uses forms that need enhancement
+  import { enhance } from '$app/forms';
   import { goto } from '$app/navigation';
   import { browser } from '$app/environment';
   import { fly } from 'svelte/transition';
-   import { quintOut } from 'svelte/easing'; // For sidebar transition
+  import { quintOut } from 'svelte/easing';
 
   // Lucide icons for Settings page content
   import SunIcon from 'lucide-svelte/icons/sun';
@@ -16,23 +16,18 @@
   import Palette from 'lucide-svelte/icons/palette';
   import Trash2 from 'lucide-svelte/icons/trash-2';
   import Eye from 'lucide-svelte/icons/eye';
-  import { ListChecks } from 'lucide-svelte/icons';
-  import { CalendarDays } from 'lucide-svelte/icons';
-  // Header icons (Bell, Help, Profile) are inline SVGs in the new layout
+  import ListChecks from 'lucide-svelte/icons/list-checks';
+  import CalendarDays from 'lucide-svelte/icons/calendar-days';
 
-  // Data prop for user info (if passed from a load function)
   export let data: { user?: { name?: string } } = {};
 
-  // --- STATE FOR HEADER & SIDEBAR ---
   let headerUsername: string = data.user?.name || 'User';
   let isSidebarOpen = false;
-  let isDarkMode = false; // Single source of truth for theme
+  let isDarkMode = false; 
   
-  // Dropdown IDs for the header icons (bell, help, profile)
   const dropdownIds = ['notifWindow', 'helpWindow', 'profileWindow'];
 
-  // --- STATE FOR SETTINGS PAGE FORMS ---
-  let formUsername = ''; // Settings form field for username
+  let formUsername = ''; 
   let displayName = '';
   let email = '';
   let bio = '';
@@ -51,7 +46,6 @@
   let workingHoursEnd = '17:00';
   let highContrastMode = false;
 
-  // Reactive update for header username
   $: if (data && data.user?.name && browser) {
       headerUsername = data.user.name;
   } else if (browser && (!data?.user || !data.user.name)) { 
@@ -60,8 +54,6 @@
       else headerUsername = 'User';
   }
 
-
-  // --- HEADER & SIDEBAR FUNCTIONS ---
   function toggleSidebar() {
       isSidebarOpen = !isSidebarOpen;
   }
@@ -70,26 +62,44 @@
       isSidebarOpen = false;
   }
 
-  // For the DARK MODE TOGGLE BUTTON IN THE HEADER
   function toggleDarkModeHeaderButton() {
+      console.log('[Header DarkMode] Button Clicked. Before toggle: isDarkMode =', isDarkMode);
       isDarkMode = !isDarkMode;
+      console.log('[Header DarkMode] After toggle: isDarkMode =', isDarkMode);
       if (browser) {
-          document.body.classList.toggle('dark', isDarkMode);
-          localStorage.setItem('theme', isDarkMode ? 'dark' : 'light');
+          console.log('[Header DarkMode] Browser context detected.');
+          if (isDarkMode) {
+              console.log('[Header DarkMode] Adding "dark" class to document.body');
+              document.body.classList.add('dark');
+              localStorage.setItem('theme', 'dark');
+          } else {
+              console.log('[Header DarkMode] Removing "dark" class from document.body');
+              document.body.classList.remove('dark');
+              localStorage.setItem('theme', 'light');
+          }
+          console.log('[Header DarkMode] document.body classList:', document.body.classList.toString());
+          console.log('[Header DarkMode] localStorage theme:', localStorage.getItem('theme'));
+      } else {
+          console.log('[Header DarkMode] Not in browser context.');
       }
   }
   
-  // For the THEME TOGGLE BUTTON WITHIN THE SETTINGS "Appearance" SECTION
   function toggleSettingsPageThemeButton() {
+    console.log('[Settings Theme Button] Clicked. Before toggle: isDarkMode =', isDarkMode);
     isDarkMode = !isDarkMode; 
+    console.log('[Settings Theme Button] After toggle: isDarkMode =', isDarkMode);
     if (browser) {
-        document.body.classList.toggle('dark', isDarkMode);
-        localStorage.setItem('theme', isDarkMode ? 'dark' : 'light');
+        if (isDarkMode) {
+            document.body.classList.add('dark');
+            localStorage.setItem('theme', 'dark');
+        } else {
+            document.body.classList.remove('dark');
+            localStorage.setItem('theme', 'light');
+        }
     }
     handleAppearanceSave(); 
   }
 
-  // For Bell, Help, Profile dropdowns in the header
   function toggleHeaderWindow(id: string) {
       const el = document.getElementById(id);
       if (el) {
@@ -120,7 +130,6 @@
       }
   }
 
-  // --- SETTINGS PAGE SPECIFIC SAVE HANDLERS ---
   function handleProfileSave() { console.log('Saving profile:', { formUsername, displayName, email, bio }); }
   function handlePasswordChange() { console.log('Changing password'); }
   function handleAppearanceSave() { console.log('Saving appearance (theme based on isDarkMode):', { isDarkMode }); }
@@ -130,7 +139,6 @@
   function handleAccessibilitySave() { console.log('Saving accessibility settings:', { highContrastMode }); }
   function handleDeleteAccount() { if (confirm('Are you sure you want to delete your account? This action cannot be undone.')) { console.log('Deleting account');}}
 
-  // Variables to store listener functions for proper removal
   let handleGlobalClickListener: ((event: MouseEvent) => void) | null = null;
   let handleEscKeyListener: ((event: KeyboardEvent) => void) | null = null;
   
@@ -144,34 +152,49 @@
   const profileClickListener = (e: Event) => { e.stopPropagation(); toggleHeaderWindow('profileWindow'); };
 
   onMount(() => {
+      console.log('[onMount] Settings Component mounted.');
       if (browser) {
         const storedDarkMode = localStorage.getItem('theme');
+        console.log('[onMount] Stored theme from localStorage:', storedDarkMode);
         if (storedDarkMode === 'dark' || (!storedDarkMode && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+            console.log('[onMount] Initializing theme to DARK.');
             isDarkMode = true;
             document.body.classList.add('dark');
         } else {
+            console.log('[onMount] Initializing theme to LIGHT.');
             isDarkMode = false;
             document.body.classList.remove('dark');
         }
+        console.log('[onMount] Initial document.body classList:', document.body.classList.toString());
+
 
         const localUsername = localStorage.getItem('microtask_username');
         if (localUsername && localUsername !== headerUsername) {
             headerUsername = localUsername;
         }
       }
-      // TODO: Fetch actual user settings data here and populate form fields for Settings page
 
       bellButtonEl = document.getElementById('bellIcon');
       if (bellButtonEl) bellButtonEl.addEventListener('click', bellClickListener);
+      else console.error("[onMount] bellIcon not found");
       
       helpButtonEl = document.getElementById('helpIcon');
       if (helpButtonEl) helpButtonEl.addEventListener('click', helpClickListener);
+      else console.error("[onMount] helpIcon not found");
 
       profileButtonEl = document.getElementById('profileIcon');
       if (profileButtonEl) profileButtonEl.addEventListener('click', profileClickListener);
+      else console.error("[onMount] profileIcon not found");
       
+      // This is the dark mode button in the HEADER
       darkModeHeaderToggleEl = document.getElementById('darkModeToggle'); 
-      if (darkModeHeaderToggleEl) darkModeHeaderToggleEl.addEventListener('click', toggleDarkModeHeaderButton);
+      console.log('[onMount] Attempting to find header darkModeToggle button:', darkModeHeaderToggleEl);
+      if (darkModeHeaderToggleEl) {
+          console.log('[onMount] Header darkModeToggle button FOUND. Adding event listener.');
+          darkModeHeaderToggleEl.addEventListener('click', toggleDarkModeHeaderButton);
+      } else {
+          console.error('[onMount] Header darkModeToggle button NOT FOUND. Check the ID in your HTML - it should be "darkModeToggle".');
+      }
 
       handleGlobalClickListener = (event: MouseEvent) => {
           const target = event.target as Node | null;
@@ -211,13 +234,17 @@
       document.addEventListener('keydown', handleEscKeyListener);
 
       return () => {
+          console.log('[onDestroy] Settings Component unmounting. Cleaning up listeners.');
           if (handleGlobalClickListener) document.removeEventListener('click', handleGlobalClickListener);
           if (handleEscKeyListener) document.removeEventListener('keydown', handleEscKeyListener);
           
           if (bellButtonEl) bellButtonEl.removeEventListener('click', bellClickListener);
           if (helpButtonEl) helpButtonEl.removeEventListener('click', helpClickListener);
           if (profileButtonEl) profileButtonEl.removeEventListener('click', profileClickListener);
-          if (darkModeHeaderToggleEl) darkModeHeaderToggleEl.removeEventListener('click', toggleDarkModeHeaderButton);
+          if (darkModeHeaderToggleEl) {
+            console.log('[onDestroy] Removing listener from header darkModeToggle button.');
+            darkModeHeaderToggleEl.removeEventListener('click', toggleDarkModeHeaderButton);
+          }
       };
   });
 </script>
@@ -330,7 +357,6 @@
   {/if}
 
   <div class="flex-1 flex flex-col overflow-hidden">
-    <!-- HEADER with NEW icon layout -->
     <header class={`top-header ${isDarkMode ? 'bg-zinc-800 border-zinc-700' : 'bg-white border-gray-200'}`}>
       <div class="header-left">
         <button id="hamburgerButton" class="menu-btn" on:click={toggleSidebar} aria-label="Toggle Sidebar">
@@ -354,7 +380,7 @@
           <button id="helpIcon" aria-label="Help & FAQ" class="p-1.5 rounded-full hover:bg-gray-100 dark:hover:bg-zinc-700 text-gray-600 dark:text-zinc-400">
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-5 h-5" aria-hidden="true"><path fill-rule="evenodd" d="M2.25 12c0-5.385 4.365-9.75 9.75-9.75s9.75 4.365 9.75 9.75-4.365 9.75-9.75 9.75S2.25 17.385 2.25 12zm8.706-1.442c1.146-.573 2.437.463 2.126 1.706l-.709 2.836.042-.02a.75.75 0 01.67 1.34l-.042.022c-1.147.573-2.438-.463-2.127-1.706l.71-2.836-.042.02a.75.75 0 11-.671-1.34l.041-.022zM12 9a.75.75 0 100-1.5.75.75 0 000 1.5z" clip-rule="evenodd" /></svg>
           </button>
-          <div id="helpWindow" class={`dropdown-window hidden ${isDarkMode ? 'bg-zinc-700 border-zinc-600 text-zinc-300' : 'bg-white border-gray-200 text-gray-700'}`}>
+          <div id="helpWindow" class={`dropdown-window hidden w-72 max-h-80 overflow-y-auto custom-scrollbar ${isDarkMode ? 'bg-zinc-700 border-zinc-600 text-zinc-300' : 'bg-white border-gray-200 text-gray-700'}`}>
             <h3 class="font-semibold mb-2 text-sm">FAQ</h3><ul class="list-disc list-inside space-y-1 text-xs"><li>How do I add a task?</li><li>Where is the calendar?</li></ul><a href="/support" class="text-xs text-blue-500 dark:text-blue-400 hover:underline mt-2 block">Visit Support</a>
           </div>
         </div>
@@ -362,14 +388,14 @@
           <button id="profileIcon" aria-label="Profile Menu" class="p-1.5 rounded-full hover:bg-gray-100 dark:hover:bg-zinc-700 text-gray-600 dark:text-zinc-400">
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-5 h-5" aria-hidden="true"><path fill-rule="evenodd" d="M18.685 19.097A9.723 9.723 0 0021.75 12c0-5.385-4.365-9.75-9.75-9.75S2.25 6.615 2.25 12a9.723 9.723 0 003.065 7.097A9.716 9.716 0 0012 21.75a9.716 9.716 0 006.685-2.653zm-12.54-1.285A7.486 7.486 0 0112 15a7.486 7.486 0 015.855 2.812A8.224 8.224 0 0112 20.25a8.224 8.224 0 01-5.855-2.438zM15.75 9a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0z" clip-rule="evenodd" /></svg>
           </button>
-          <div id="profileWindow" class={`dropdown-window hidden ${isDarkMode ? 'bg-zinc-700 border-zinc-600 text-zinc-300' : 'bg-white border-gray-200 text-gray-700'}`}>
+          <div id="profileWindow" class={`dropdown-window hidden w-60 ${isDarkMode ? 'bg-zinc-700 border-zinc-600 text-zinc-300' : 'bg-white border-gray-200 text-gray-700'}`}>
             <h3 class="font-semibold mb-2 text-sm">Profile</h3>
             <p class="text-xs mb-2 truncate">Welcome, {headerUsername || 'User'}!</p>
             <a href="/settings" class={`block text-xs px-2 py-1.5 rounded w-full text-left mb-1 transition-colors duration-150 ${isDarkMode ? 'bg-zinc-600 hover:bg-zinc-500 text-zinc-300' : 'bg-gray-100 hover:bg-gray-200 text-gray-700'}`}>Settings</a>
             <button on:click={handleLogout} class={`text-xs px-2 py-1.5 rounded w-full text-left transition-colors duration-150 ${isDarkMode ? 'bg-red-700 hover:bg-red-600 text-zinc-300' : 'bg-red-100 hover:bg-red-200 text-red-700'}`}>Logout</button>
           </div>
         </div>
-        <button id="darkModeToggle" on:click={toggleDarkModeHeaderButton} aria-label="Toggle Dark Mode" class={`ml-2 p-1.5 rounded-full transition-colors duration-150 ${isDarkMode ? 'hover:bg-zinc-700 text-zinc-300' : 'hover:bg-gray-100 text-gray-700'}`}>
+        <button id="darkModeToggle" aria-label="Toggle Dark Mode" class={`ml-2 p-1.5 rounded-full transition-colors duration-150 ${isDarkMode ? 'hover:bg-zinc-700 text-zinc-300' : 'hover:bg-gray-100 text-gray-700'}`}>
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-5 h-5">
             {#if isDarkMode} <path fill-rule="evenodd" d="M9.528 1.718a.75.75 0 0 0-.103.103l1.132 1.132a.75.75 0 0 0 1.06 0l1.132-1.132a.75.75 0 0 0-.103-1.06l-1.132-1.132a.75.75 0 0 0-1.06 0L9.63 1.615a.75.75 0 0 0-.102.103ZM12 3.75a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0v-1.5a.75.75 0 0 1 .75-.75ZM18.282 5.282a.75.75 0 0 0-1.06 0l-1.132 1.132a.75.75 0 0 0 .103 1.06l1.132 1.132a.75.75 0 0 0 1.06 0l1.132-1.132a.75.75 0 0 0-.103-1.06l-1.132-1.132a.75.75 0 000-.103ZM19.5 12a.75.75 0 01-.75.75h-1.5a.75.75 0 010-1.5h1.5a.75.75 0 01.75.75ZM18.282 18.718a.75.75 0 000 1.06l1.132 1.132a.75.75 0 001.06 0l1.132-1.132a.75.75 0 00-.103-1.06l-1.132-1.132a.75.75 0 00-1.06 0l-1.132 1.132a.75.75 0 00.103.103ZM12 18.75a.75.75 0 01-.75.75h-1.5a.75.75 0 010-1.5h1.5a.75.75 0 01.75.75ZM5.718 18.718a.75.75 0 001.06 0l1.132-1.132a.75.75 0 00-.103-1.06l-1.132-1.132a.75.75 0 00-1.06 0L4.586 17.686a.75.75 0 00.103 1.06l1.132 1.132a.75.75 0 000-.103ZM4.5 12a.75.75 0 01.75-.75h1.5a.75.75 0 010 1.5h-1.5a.75.75 0 01-.75-.75ZM5.718 5.282a.75.75 0 000-1.06l-1.132-1.132a.75.75 0 00-1.06 0L2.39 4.114a.75.75 0 00.103 1.06l1.132 1.132a.75.75 0 001.06 0l1.132-1.132a.75.75 0 00-.103-.103ZM12 6.75a5.25 5.25 0 015.25 5.25 5.25 5.25 0 01-5.25 5.25 5.25 5.25 0 01-5.25-5.25 5.25 5.25 0 015.25-5.25Z" clip-rule="evenodd" />
             {:else} <path fill-rule="evenodd" d="M10.5 3.75a6.75 6.75 0 1 0 0 13.5 6.75 6.75 0 0 0 0-13.5ZM12 16.5a4.5 4.5 0 1 1 0-9 4.5 4.5 0 010 9Z" clip-rule="evenodd" /> {/if}
@@ -378,10 +404,8 @@
       </div>
     </header>
 
-    <!-- Main Settings Content Area -->
     <main class="flex-1 p-6 md:p-10 overflow-y-auto pt-[calc(60px+1.5rem)] md:pt-[calc(60px+2.5rem)] bg-gray-100 dark:bg-zinc-900">
       <h1 class="text-3xl font-bold text-gray-800 dark:text-white mb-8">Settings</h1>
-
       <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
         <div class="lg:col-span-2 space-y-8">
           <section class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md">
@@ -645,18 +669,17 @@
   }
   .dropdown-window.hidden { display: none !important; }
 
+  /* Styles for the settings page content if needed, mostly handled by Tailwind */
+  main.bg-gray-100 { background-color: #f3f4f6; } /* Default light bg for main */
+  :global(body.dark main.bg-gray-100) { background-color: #18181b !important; } /* Dark bg for main */
+  
   :global(body.dark) {
       background-color: #18181b; 
       color: #d1d5db;
   }
-  /* Apply to the main settings container too for consistency */
-  .dark\:bg-zinc-900 {
-    background-color: #18181b;
-  }
-  .dark\:text-gray-200 {
-    color: #e5e7eb;
-  }
-
+  /* Global dark theme overrides */
+  :global(body.dark .bg-gray-100) { background-color: #18181b !important; } /* Main page background */
+  :global(body.dark .text-gray-800) { color: #e5e7eb !important; } /* Default text color for dark mode */
   :global(body.dark .top-header) { background-color: #1f2937; border-bottom-color: #374151; }
   :global(body.dark .dropdown-window) { background-color: #374151; border-color: #4b5563; color: #f3f4f6; }
   
@@ -668,38 +691,47 @@
   :global(.dark) .custom-scrollbar::-webkit-scrollbar-thumb { background: #4a5568; }
   :global(.dark) .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #718096; }
 
-  /* Ensure Tailwind form inputs respect dark mode (if not using @tailwindcss/forms) */
-  :global(.dark input[type="text"]),
-  :global(.dark input[type="email"]),
-  :global(.dark input[type="password"]),
-  :global(.dark input[type="number"]),
-  :global(.dark input[type="time"]),
-  :global(.dark input[type="date"]),
-  :global(.dark textarea),
-  :global(.dark select) {
-    background-color: #374151; /* zinc-700 / gray-700 */
-    border-color: #4b5563; /* zinc-600 / gray-600 */
-    color: #e5e7eb; /* gray-200 */
+  /* Ensuring settings form elements are styled correctly in dark mode */
+  :global(body.dark .bg-white) { background-color: #1f2937 !important; } /* Section backgrounds */
+  :global(body.dark .text-gray-700) { color: #d1d5db !important; } /* Section titles and primary text */
+  :global(body.dark .text-gray-600) { color: #9ca3af !important; } /* Labels and secondary text */
+  :global(body.dark .text-gray-500) { color: #6b7280 !important; } /* Tertiary text */
+  :global(body.dark .border-gray-300) { border-color: #4b5563 !important; } /* Input borders */
+  
+  :global(body.dark input[type="text"]),
+  :global(body.dark input[type="email"]),
+  :global(body.dark input[type="password"]),
+  :global(body.dark input[type="number"]),
+  :global(body.dark input[type="time"]),
+  :global(body.dark input[type="date"]),
+  :global(body.dark textarea),
+  :global(body.dark select) {
+    background-color: #374151 !important; /* dark:bg-gray-700 equivalent */
+    border-color: #4b5563 !important; /* dark:border-gray-600 equivalent */
+    color: #f9fafb !important; /* dark:text-white equivalent */
   }
-  :global(.dark input[type="text"]::placeholder),
-  :global(.dark input[type="email"]::placeholder),
-  :global(.dark textarea::placeholder) {
-    color: #9ca3af; /* gray-400 */
+  :global(body.dark input[type="text"]::placeholder),
+  :global(body.dark input[type="email"]::placeholder),
+  :global(body.dark textarea::placeholder) {
+    color: #9ca3af !important; /* dark:text-gray-400 for placeholders */
   }
-  :global(.dark .form-checkbox) {
-    background-color: #4b5563; /* zinc-600 / gray-600 */
-    border-color: #6b7280; /* zinc-500 / gray-500 */
+  :global(body.dark .form-checkbox) {
+    background-color: #4b5563 !important;
+    border-color: #6b7280 !important;
   }
-  :global(.dark .form-checkbox:checked) {
-    background-color: #2563eb; /* blue-600 */
-    border-color: #2563eb;
+  :global(body.dark .form-checkbox:checked) {
+    background-color: #2563eb !important; /* Tailwind's blue-600 */
+    border-color: #2563eb !important;
   }
-  :global(.dark input[type="file"]::file-selector-button) {
-    background-color: #1e3a8a; /* blue-900 */
-    color: #93c5fd; /* blue-300 */
+  :global(body.dark input[type="file"]::file-selector-button) {
+    background-color: #1e3a8a !important; /* dark:file:bg-blue-900 */
+    color: #93c5fd !important; /* dark:file:text-blue-300 */
   }
-  :global(.dark input[type="file"]::file-selector-button:hover) {
-    background-color: #1e40af; /* blue-800 */
+  :global(body.dark input[type="file"]::file-selector-button:hover) {
+    background-color: #1e40af !important; /* dark:hover:file:bg-blue-800 */
   }
+  :global(body.dark .dark\:bg-gray-800) { background-color: #1f2937 !important; }
+  :global(body.dark .dark\:text-gray-200) { color: #e5e7eb !important; }
+  :global(body.dark .dark\:text-gray-300) { color: #d1d5db !important; }
 
 </style>
