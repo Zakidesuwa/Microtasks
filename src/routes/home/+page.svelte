@@ -729,14 +729,6 @@
     </header>
 
     <div class="flex-1 overflow-y-auto pt-[60px] pb-20 flex flex-col">
-      <div class={`w-full px-4 sm:px-6 py-3 flex items-center gap-3 shadow-md flex-shrink-0 ${isDarkMode ? 'bg-zinc-800 text-zinc-100 border-zinc-700' : 'bg-zinc-800 text-white border-gray-200'}`}>
-        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-8 h-8 hover:scale-110 transition-transform" aria-hidden="true"><path d="M11.47 3.84a.75.75 0 011.06 0l8.69 8.69a.75.75 0 101.06-1.06l-8.689-8.69a2.25 2.25 0 00-3.182 0l-8.69 8.69a.75.75 0 001.061 1.06l8.69-8.69z" /><path d="M12 5.432l8.159 8.159c.03.03.06.058.091.086v6.198c0 1.035-.84 1.875-1.875 1.875H15a.75.75 0 01-.75-.75v-4.5a.75.75 0 00-.75-.75h-3a.75.75 0 00-.75.75V21a.75.75 0 01-.75.75H5.625a1.875 1.875 0 01-1.875-1.875v-6.198a2.29 2.29 0 00.091-.086L12 5.43z" /></svg>
-        <span class="text-lg sm:text-xl font-semibold">Home</span>
-        <div class={`ml-auto flex items-center px-3 py-1 rounded-md shadow-sm w-48 sm:w-64 ${isDarkMode ? 'bg-zinc-700 text-zinc-400' : 'bg-white text-black'}`}>
-          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-4 h-4 mr-2" class:text-gray-400={!isDarkMode} class:text-zinc-400={isDarkMode} aria-hidden="true"><path fill-rule="evenodd" d="M9 3.5a5.5 5.5 0 100 11 5.5 5.5 0 000-11zM2 9a7 7 0 1112.452 4.391l3.328 3.329a.75.75 0 11-1.06 1.06l-3.329-3.328A7 7 0 012 9z" clip-rule="evenodd" /></svg>
-          <span class="text-sm">Search...</span>
-        </div>
-      </div>
 
       <div class="px-4 sm:px-6 mt-6">
         <h1 class={`text-2xl sm:text-3xl font-bold ${isDarkMode ? 'text-zinc-100' : 'text-gray-800'}`}>{greeting}, <span class={`${isDarkMode ? 'text-blue-400' : 'text-blue-600'}`}>{username.toUpperCase()}</span>!</h1>
@@ -901,7 +893,7 @@
         </section>
       </main>
 
-      <div id="aiChatToggle" class="fixed bottom-10 left-16 w-16 h-16 cursor-pointer z-40 transition-opacity duration-200">
+      <div id="aiChatToggle" class="fixed bottom-10 right-16 w-16 h-16 cursor-pointer z-40 transition-opacity duration-200">
         <button class="w-full h-full bg-purple-600 rounded-full shadow-lg flex items-center justify-center hover:bg-purple-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-purple-500 transform hover:scale-105 transition-all duration-150" aria-label="Toggle AI Chat">
           <img src="/Ai.png" alt="Ask Synthia AI" class="w-9 h-9" />
         </button>

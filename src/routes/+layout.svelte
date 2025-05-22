@@ -2,7 +2,8 @@
  	import '../app.css';
  	import { onMount } from 'svelte';
 	import FcmManager from '$lib/components/FcmManager.svelte'; 
-  
+	import { navigating } from '$app/stores';
+	import LoadingIndicator from '$lib/components/LoadingIndicator.svelte';
  	let { children } = $props();
 
  	onMount(() => {
@@ -15,6 +16,10 @@
  		}
  	});
 </script>
+{#if $navigating}
+  <LoadingIndicator />
+{/if}
+
 
 <FcmManager /> 
  
