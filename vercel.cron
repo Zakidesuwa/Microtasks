@@ -1,8 +1,0 @@
-{
-  "crons": [
-    {
-      "path": "/send-reminders?secret=Return01MdevOnTop",
-      "schedule": "0 * * * *" // This runs every hour at the start of the hour
-    }
-  ]
-}
