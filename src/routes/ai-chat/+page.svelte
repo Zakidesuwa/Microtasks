@@ -249,6 +249,23 @@
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-5 h-5" aria-hidden="true"><path d="M11.47 3.84a.75.75 0 011.06 0l8.69 8.69a.75.75 0 101.06-1.06l-8.689-8.69a2.25 2.25 0 00-3.182 0l-8.69 8.69a.75.75 0 001.061 1.06l8.69-8.69z" /><path d="M12 5.432l8.159 8.159c.03.03.06.058.091.086v6.198c0 1.035-.84 1.875-1.875 1.875H15a.75.75 0 01-.75-.75v-4.5a.75.75 0 00-.75-.75h-3a.75.75 0 00-.75.75V21a.75.75 0 01-.75.75H5.625a1.875 1.875 0 01-1.875-1.875v-6.198a2.29 2.29 0 00.091-.086L12 5.43z" /></svg>
             <span>Home</span>
           </a>
+          <a href="/dashboard" 
+             class="flex items-center gap-3 px-3 py-2 rounded-md font-semibold transition-colors duration-150"
+             class:bg-blue-600={!isDarkMode && $page.url.pathname === '/dashboard'} 
+             class:bg-blue-800={isDarkMode && $page.url.pathname === '/dashboard'} 
+             class:text-white={$page.url.pathname === '/dashboard'}
+             class:text-gray-700={!isDarkMode && $page.url.pathname !== '/dashboard'}
+             class:text-zinc-300={isDarkMode && $page.url.pathname !== '/dashboard'}
+             class:hover:bg-gray-100={!isDarkMode} 
+             class:hover:bg-zinc-700={isDarkMode}
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-5 h-5" aria-hidden="true">
+              <path d="M10.5 4.5a1.5 1.5 0 00-3 0v15a1.5 1.5 0 003 0V4.5z" />
+              <path d="M4.5 10.5a1.5 1.5 0 000 3h15a1.5 1.5 0 000-3h-15z" /> 
+              <path fill-rule="evenodd" d="M1.5 3A1.5 1.5 0 013 1.5h18A1.5 1.5 0 0122.5 3v18a1.5 1.5 0 01-1.5 1.5H3A1.5 1.5 0 011.5 21V3zm1.5.75v16.5h16.5V3.75H3z" clip-rule="evenodd" />
+            </svg>
+            <span>Dashboard</span>
+          </a>
           <a href="/tasks"
              class={`flex items-center gap-3 px-3 py-2 rounded-md font-semibold transition-colors duration-150
                     ${currentPath === '/tasks' ? (isDarkMode ? 'bg-blue-700 text-white' : 'bg-blue-600 text-white') : (isDarkMode ? 'text-zinc-300 hover:bg-zinc-700' : 'text-gray-700 hover:bg-gray-100')}`}

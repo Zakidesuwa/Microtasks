@@ -36,10 +36,22 @@ export const load: PageServerLoad = async ({ locals, url }) => {
     if (!userId) {
         console.warn('[Server Load /home] No userId found in locals.');
         // Return the expected structure even if not authenticated, including the showCompleted state
-        return { notes: [], tasks: [], showCompleted: shouldShowCompleted, error: 'User not authenticated. Please log in.' };
+        return { notes: [], tasks: [], showCompleted: shouldShowCompleted, error: 'User not authenticated. Please log in.', username: 'User' };
     }
     console.log(`[Server Load /home] Loading data for user: ${userId}`);
 
+    let username = 'User';
+    try {
+        const credDocRef = adminDb.collection('credentials').doc(userId);
+        const credDoc = await credDocRef.get();
+        if (credDoc.exists) {
+            username = credDoc.data()?.username || 'User';
+        } else {
+            console.warn(`[Server Load /home] Credentials document not found for userId: ${userId}. Defaulting name to 'User'.`);
+        }
+    } catch (userError: any) {
+        console.error(`[Server Load /home] Error fetching user credentials for ${userId}:`, userError);
+    }
     try {
         // --- Fetch Notes ---
         const notesCollectionRef = adminDb.collection('notes');
@@ -127,7 +139,7 @@ export const load: PageServerLoad = async ({ locals, url }) => {
         });
 
         // Return all fetched data
-        return { notes, tasks: tasksData, showCompleted: shouldShowCompleted };
+        return { notes, tasks: tasksData, showCompleted: shouldShowCompleted, username: username };
 
     } catch (error: any) {
         console.error('[Server Load /home] !!! ERROR loading data from Firestore (Admin SDK) !!!:', error);
@@ -141,7 +153,7 @@ export const load: PageServerLoad = async ({ locals, url }) => {
         }
         // Return generic error for other issues
         return {
-            notes: [], tasks: [], showCompleted: shouldShowCompleted,
+            notes: [], tasks: [], showCompleted: shouldShowCompleted, username: 'User',
             error: `Failed to load data: ${error.message || 'Server Error'}. Check server logs.`
         };
     }

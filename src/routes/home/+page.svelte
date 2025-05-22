@@ -1,8 +1,8 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { page } from '$app/stores';
-  import { db } from '$lib/firebase.js';
-  import { collection, query, where, getDocs, doc, getDoc, updateDoc } from 'firebase/firestore';
+  import { db } from '$lib/firebase.js'; // Client-side Firebase instance (still used for other potential client operations)
+  // Removed direct Firestore client-side imports for username fetching as it's now server-side
   import { enhance } from '$app/forms';
   import { slide, scale, fly, fade } from 'svelte/transition';
   import { quintOut } from 'svelte/easing';
@@ -15,11 +15,13 @@
   let noteTitle = "";
   let noteContent = "";
   let expandedNoteId: string | null = null;
-  let username = "";
+  
+  let username = "User"; // Default, will be set by server data
   let greeting = "GOOD DAY";
-  let email = ''; // Not actively used, but kept for potential future use
-  let usernameFromUrl = '';
-  let isChatExpanded = false;
+  // email and usernameFromUrl might not be needed if all username logic is server-side now
+  // let email = ''; 
+  // let usernameFromUrl = ''; 
+
   let isRefreshingNotes = false;
   let isRefreshingTasks = false;
   let errorMessage: string | null = null;
@@ -49,34 +51,47 @@
   }
 
   const dropdownIds = ['notifWindow', 'helpWindow', 'profileWindow'];
-  // menuIds removed as dots menus are removed
 
   interface Task {
     id: string;
-    description: string; // Assuming this is used for task title in the list
+    description: string; // This is used as title in the UI for today's tasks
     isCompleted: boolean;
-    createdAt: string | null;
+    createdAt: string | null; // Assuming this is createdAtISO from server
     userId?: string;
-    dueDate?: string | null;
+    dueDate?: string | null; // Assuming this is dueDateISO (YYYY-MM-DD) from server
     priority?: string | number;
     tags?: string[];
     noteId?: string;
+    // color?: string; // Add if you use color for tasks on home page
   }
 
+  // Updated to include username from server
   interface PageData {
     notes?: {
       id: string;
       title: string;
       content: string;
-      createdAt: string | null;
+      createdAt: string | null; // ISO string
       userId?: string;
     }[];
     tasks?: Task[];
     showCompleted?: boolean;
     error?: string;
+    username?: string; // Username provided by the server load function
   }
 
   export let data: PageData;
+
+  // Reactive statement to update component's username from server data
+  $: if (data && data.username) {
+    username = data.username;
+    if (browser) { 
+        saveUsername(username); // Persist to localStorage for potential other uses or faster non-SSR updates
+    }
+  } else if (browser && !data.username) { // Fallback if server doesn't provide username for some reason
+    username = getStoredUsername();
+  }
+
 
   $: {
     if (data?.error) {
@@ -93,19 +108,16 @@
   }
 
   $: if (browser) {
-    const aiChatToggle = document.getElementById('aiChatToggle');
-    if (aiChatToggle) {
-      if (showNoteForm || expandedNoteId !== null || showTaskForm) {
-        aiChatToggle.classList.add('hidden');
+    const aiChatToggleEl = document.getElementById('aiChatToggle');
+    if (aiChatToggleEl) {
+      if (showNoteForm || showTaskForm || (expandedNoteId !== null && !showNoteForm) ) {
+        aiChatToggleEl.classList.add('hidden');
       } else {
-        aiChatToggle.classList.remove('hidden');
+        aiChatToggleEl.classList.remove('hidden');
       }
     }
   }
 
-  // toggleShowCompleted function is no longer triggered by a menu,
-  // if needed, a new UI element should call it.
-  // For now, keeping it in case you add a new trigger.
   function toggleShowCompleted() {
     const currentUrl = new URL($page.url);
     const nextShowCompleted = !showCompletedTasks;
@@ -131,22 +143,14 @@
 
   function openAddTaskForm() {
     showTaskForm = true;
-    taskTitle = "";
-    taskDescription = "";
-    taskDueDate = null;
-    taskDueTime = null;
-    taskPriority = 'standard';
-    taskTags = '';
+    taskTitle = ""; taskDescription = ""; taskDueDate = null; taskDueTime = null;
+    taskPriority = 'standard'; taskTags = '';
   }
 
   function closeTaskForm() {
     showTaskForm = false;
-    taskTitle = "";
-    taskDescription = "";
-    taskDueDate = null;
-    taskDueTime = null;
-    taskPriority = 'standard';
-    taskTags = '';
+    taskTitle = ""; taskDescription = ""; taskDueDate = null; taskDueTime = null;
+    taskPriority = 'standard'; taskTags = '';
   }
 
   function closeSidebar() {
@@ -155,57 +159,39 @@
 
   function toggleWindow(id: string) {
     const el = document.getElementById(id);
-    if (el) {
-      el.classList.toggle('hidden');
-    }
+    if (el) el.classList.toggle('hidden');
   }
 
   function closeOtherWindows(currentId: string) {
     dropdownIds.forEach(id => {
       if (id !== currentId) {
         const el = document.getElementById(id);
-        if (el && !el.classList.contains('hidden')) {
-          el.classList.add('hidden');
-        }
+        if (el && !el.classList.contains('hidden')) el.classList.add('hidden');
       }
     });
   }
 
   function openAddNoteForm() {
-    showNoteForm = true;
-    editingNoteId = null;
-    noteTitle = "";
-    noteContent = "";
+    showNoteForm = true; editingNoteId = null; noteTitle = ""; noteContent = "";
   }
 
   function openEditNoteForm(note: { id: string; title: string; content: string }) {
-    showNoteForm = true;
-    editingNoteId = note.id;
-    noteTitle = note.title;
-    noteContent = note.content;
+    showNoteForm = true; editingNoteId = note.id; noteTitle = note.title; noteContent = note.content;
   }
 
   function closeForm() {
-    showNoteForm = false;
-    noteTitle = "";
-    noteContent = "";
-    editingNoteId = null;
+    showNoteForm = false; noteTitle = ""; noteContent = ""; editingNoteId = null;
   }
 
   const taskAddFormEnhanceCallback = () => {
     return async ({ result, update }: { result: any, update: any }) => {
       if (result.type === 'success' || result.type === 'redirect') {
-        closeTaskForm();
-        await invalidateAll();
+        closeTaskForm(); await invalidateAll();
       } else if (result.type === 'failure') {
-        console.error("[Home Page / +page.svelte] Task add form submission failure:", result.data);
         const formError = result.data?.taskForm?.error || result.data?.error;
         errorMessage = formError || 'Failed to add task.';
-        if (formError && formError.toLowerCase().includes('authentication required')) {
-          goto('/login'); // Redirect if auth error
-        }
+        if (formError && formError.toLowerCase().includes('authentication required')) goto('/login'); 
       } else if (result.type === 'error') {
-         console.error("[Home Page / +page.svelte] Task add form submission error (enhance):", result.error);
         errorMessage = result.error?.message || 'An unexpected error occurred.';
       }
       await update({ reset: result.type !== 'failure' });
@@ -215,17 +201,12 @@
   const noteFormEnhanceCallback = () => {
     return async ({ result, update }: { result: any, update: any }) => {
       if (result.type === 'success' || result.type === 'redirect') {
-        closeForm();
-        await invalidateAll();
+        closeForm(); await invalidateAll();
       } else if (result.type === 'failure') {
-        console.error("[Home Page / +page.svelte] Note form submission failure:", result.data);
         const formError = result.data?.noteForm?.error || result.data?.error;
         errorMessage = formError || (editingNoteId ? 'Failed to update note.' : 'Failed to add note.');
-        if (formError && formError.toLowerCase().includes('authentication required')) {
-          goto('/login'); // Redirect if auth error
-        }
+        if (formError && formError.toLowerCase().includes('authentication required')) goto('/login'); 
       } else if (result.type === 'error') {
-        console.error("[Home Page / +page.svelte] Note form submission error (enhance):", result.error);
         errorMessage = result.error?.message || 'An unexpected error occurred with the note form.';
       }
        await update({ reset: result.type !== 'failure' });
@@ -235,43 +216,24 @@
   const taskFormEnhanceCallback = () => {
     return async ({ result, update }: { result: any, update: any }) => {
       if (result.type === 'failure') {
-        console.error("[Home Page / +page.svelte] Task toggle failure:", result.data);
         errorMessage = result.data?.error || 'Failed to update task status.';
-        await invalidateAll();
       } else if (result.type === 'error') {
-        console.error("[Home Page / +page.svelte] Task toggle error (enhance):", result.error);
         errorMessage = result.error?.message || 'An unexpected error occurred toggling the task.';
-        await invalidateAll();
-      } else if (result.type === 'success') {
-        if (errorMessage?.startsWith('Failed to update task')) {
-          errorMessage = null;
-        }
-        await invalidateAll();
+      } else if (result.type === 'success' && errorMessage?.startsWith('Failed to update task')) {
+        errorMessage = null;
       }
+      await invalidateAll(); 
       await update({ reset: false });
     };
   };
 
-  const handleEscKey = (event: KeyboardEvent) => {
-    if (event.key === 'Escape') {
-      if (showNoteForm) closeForm();
-      if (showTaskForm) closeTaskForm();
-      if (showDeleteConfirmation) showDeleteConfirmation = false;
-      if (isSidebarOpen) closeSidebar();
-    }
-  };
-
   function getStoredUsername(): string {
-    if (browser) {
-      return localStorage.getItem('microtask_username') || "User";
-    }
+    if (browser) return localStorage.getItem('microtask_username') || "User";
     return "User";
   }
 
   function saveUsername(name: string): void {
-    if (browser) {
-      localStorage.setItem('microtask_username', name);
-    }
+    if (browser) localStorage.setItem('microtask_username', name);
   }
 
   function getGreeting() {
@@ -279,31 +241,6 @@
     if (hour >= 5 && hour < 12) return "GOOD MORNING";
     if (hour >= 12 && hour < 18) return "GOOD AFTERNOON";
     return "GOOD EVENING";
-  }
-  
-  async function fetchUsernameFromFirebase() {
-    if (!browser) return;
-    try {
-      const userId = document.cookie
-        .split('; ')
-        .find(row => row.startsWith('userId='))
-        ?.split('=')[1];
-
-      if (userId) {
-        const userDocRef = doc(db, 'credentials', userId);
-        const userDoc = await getDoc(userDocRef);
-        if (userDoc.exists()) {
-          const userData = userDoc.data();
-          if (userData.username) {
-            username = userData.username;
-            saveUsername(username);
-          } else { username = getStoredUsername(); }
-        } else { username = getStoredUsername(); }
-      } else { username = getStoredUsername(); }
-    } catch (error) {
-      console.error("[Home Page / +page.svelte] Error fetching/updating username from Firebase:", error);
-      username = getStoredUsername();
-    }
   }
   
   function handleLogout() {
@@ -314,55 +251,164 @@
     }
   }
 
-  function updateChatWindowStyle() {
-    if (!browser || !document.getElementById('aiChatWindow')) return;
-    const aiChatWindow = document.getElementById('aiChatWindow');
-    const aiExpandedLogo = document.getElementById('aiExpandedLogo');
-    const expandChat = document.getElementById('expandChat');
-    const chatMessages = document.getElementById('chatMessages');
-    if (!aiChatWindow) return;
-    const expandButtonSvg = expandChat?.querySelector('svg'); // Changed from img to svg
+  let isDragging = false;
+  let dragOffsetX = 0, dragOffsetY = 0;
+  let chatWindowElement: HTMLElement | null = null;
+  let chatHeaderElement: HTMLElement | null = null;
 
-    if (isChatExpanded) {
-      aiChatWindow.style.bottom = '0'; aiChatWindow.style.right = '0';
-      aiChatWindow.style.width = '100%'; aiChatWindow.style.height = '100%';
-      aiChatWindow.style.maxWidth = '100%'; aiChatWindow.style.maxHeight = '100%';
-      aiChatWindow.style.borderRadius = '0';
-      aiChatWindow.classList.add('chat-expanded');
-      if (expandButtonSvg) expandButtonSvg.style.transform = 'rotate(180deg)';
-      if (aiExpandedLogo) aiExpandedLogo.classList.remove('hidden');
-      if (chatMessages?.querySelector('h2.initial-prompt-title')) {
+  let isResizing = false;
+  let resizeStartX = 0, resizeStartY = 0;
+  let initialWidth = 0, initialHeight = 0;
+  let resizeHandleElement: HTMLElement | null = null;
+  const MIN_CHAT_WIDTH = 250, MIN_CHAT_HEIGHT = 200;
+
+  let aiSpeechBubbleElement: HTMLElement | null = null;
+  let aiBubbleTimeoutId: number | null = null;
+  let aiBubbleIntervalId: number | null = null;
+  const aiBubbleMessages = [
+    "Tap me for assistance!", "Got a question? Click me!", "Need help with tasks?", "I'm Synthia, your AI pal!", "Let's be productive!"
+  ];
+
+  function showRandomAiSpeechBubble() {
+    const aiChatToggleEl = document.getElementById('aiChatToggle');
+    const chatWinEl = document.getElementById('aiChatWindow');
+
+    if (!browser || !aiChatToggleEl || !aiSpeechBubbleElement || 
+        (chatWinEl && !chatWinEl.classList.contains('hidden')) || 
+        showNoteForm || showTaskForm || isSidebarOpen || 
+        aiChatToggleEl.classList.contains('hidden')
+    ) {
+      if (aiSpeechBubbleElement && aiSpeechBubbleElement.classList.contains('visible')) {
+        aiSpeechBubbleElement.classList.remove('visible');
+      }
+      return;
+    }
+
+    const randomIndex = Math.floor(Math.random() * aiBubbleMessages.length);
+    aiSpeechBubbleElement.textContent = aiBubbleMessages[randomIndex];
+    aiSpeechBubbleElement.classList.add('visible'); 
+
+    if (aiBubbleTimeoutId) clearTimeout(aiBubbleTimeoutId);
+    aiBubbleTimeoutId = window.setTimeout(() => {
+      aiSpeechBubbleElement?.classList.remove('visible');
+    }, 4000); 
+  }
+
+
+  function onDragMouseDown(event: MouseEvent) {
+    if (event.target === resizeHandleElement || isResizing || !chatWindowElement || !chatHeaderElement) return;
+    const target = event.target as HTMLElement;
+    if (!chatHeaderElement.contains(target) || target.closest('button')) return;
+    isDragging = true;
+    dragOffsetX = event.clientX - chatWindowElement.offsetLeft;
+    dragOffsetY = event.clientY - chatWindowElement.offsetTop;
+    chatHeaderElement.classList.add('grabbing');
+    chatWindowElement.classList.add('user-select-none');
+    chatWindowElement.style.transition = 'none'; 
+    const rect = chatWindowElement.getBoundingClientRect();
+    chatWindowElement.style.left = `${rect.left}px`;
+    chatWindowElement.style.top = `${rect.top}px`;
+    chatWindowElement.style.bottom = 'auto'; chatWindowElement.style.right = 'auto';
+    event.preventDefault();
+  }
+
+  function onDragMouseMove(event: MouseEvent) {
+    if (!isDragging || !chatWindowElement) return;
+    let newX = event.clientX - dragOffsetX;
+    let newY = event.clientY - dragOffsetY;
+    const elRect = chatWindowElement.getBoundingClientRect();
+    newX = Math.max(0, Math.min(newX, window.innerWidth - elRect.width));
+    newY = Math.max(0, Math.min(newY, window.innerHeight - elRect.height));
+    chatWindowElement.style.left = `${newX}px`;
+    chatWindowElement.style.top = `${newY}px`;
+  }
+
+  function onDragMouseUp() {
+    if (!isDragging || !chatHeaderElement || !chatWindowElement) return;
+    isDragging = false;
+    chatHeaderElement.classList.remove('grabbing');
+    chatWindowElement.classList.remove('user-select-none');
+    chatWindowElement.style.transition = ''; 
+  }
+
+  function onResizeMouseDown(event: MouseEvent) {
+    if (isDragging || !chatWindowElement || !resizeHandleElement) return; 
+    isResizing = true;
+    resizeStartX = event.clientX; resizeStartY = event.clientY;
+    initialWidth = chatWindowElement.offsetWidth; initialHeight = chatWindowElement.offsetHeight;
+    chatWindowElement.classList.add('user-select-none', 'resizing');
+    chatWindowElement.style.transition = 'none'; 
+    const rect = chatWindowElement.getBoundingClientRect();
+    chatWindowElement.style.left = `${rect.left}px`; chatWindowElement.style.top = `${rect.top}px`;
+    chatWindowElement.style.bottom = 'auto'; chatWindowElement.style.right = 'auto';
+    chatWindowElement.style.width = `${initialWidth}px`; chatWindowElement.style.height = `${initialHeight}px`;
+    event.preventDefault(); event.stopPropagation(); 
+  }
+
+  function onResizeMouseMove(event: MouseEvent) {
+    if (!isResizing || !chatWindowElement) return;
+    const deltaX = event.clientX - resizeStartX, deltaY = event.clientY - resizeStartY;
+    let newWidth = initialWidth + deltaX, newHeight = initialHeight + deltaY;
+    newWidth = Math.max(MIN_CHAT_WIDTH, newWidth); newHeight = Math.max(MIN_CHAT_HEIGHT, newHeight);
+    chatWindowElement.style.width = `${newWidth}px`; chatWindowElement.style.height = `${newHeight}px`;
+  }
+
+  function onResizeMouseUp() {
+    if (!isResizing || !chatWindowElement) return;
+    isResizing = false;
+    chatWindowElement.classList.remove('user-select-none', 'resizing');
+    chatWindowElement.style.transition = ''; 
+  }
+
+  const handleEscKey = (event: KeyboardEvent) => {
+    if (event.key === 'Escape') {
+      if (showNoteForm) closeForm(); if (showTaskForm) closeTaskForm();
+      if (showDeleteConfirmation) showDeleteConfirmation = false;
+      if (isSidebarOpen) closeSidebar();
+      if (isDragging) onDragMouseUp(); if (isResizing) onResizeMouseUp(); 
+    }
+  };
+
+  function updateChatWindowStyle() {
+    if (!browser || !chatWindowElement ) return;
+    const chatMessages = document.getElementById('chatMessages');
+    
+    chatWindowElement.style.bottom = '100px'; 
+    chatWindowElement.style.left = '16px';   
+    chatWindowElement.style.right = 'auto';  
+    chatWindowElement.style.top = 'auto';
+    
+    if (!isDragging && !isResizing) {
+        const currentWidth = chatWindowElement.style.width;
+        const currentHeight = chatWindowElement.style.height;
+        if (!currentWidth || currentWidth === '100%') { 
+            chatWindowElement.style.width = '380px'; 
+        }
+        if (!currentHeight || currentHeight === '100%') { 
+             chatWindowElement.style.height = '480px';
+        }
+    }
+    
+    chatWindowElement.style.maxWidth = '90vw'; 
+    chatWindowElement.style.maxHeight = 'calc(100vh - 120px)';
+    chatWindowElement.style.borderRadius = '1rem';
+    chatWindowElement.classList.remove('chat-expanded'); 
+
+    if (chatMessages?.querySelector('h2.initial-prompt-title')) {
         chatMessages.classList.add('items-center', 'justify-center', 'text-center');
         chatMessages.classList.remove('items-start', 'justify-start', 'text-left');
-      } else {
-        chatMessages?.classList.remove('items-center', 'justify-center', 'text-center');
-        chatMessages?.classList.add('items-start', 'justify-start', 'text-left');
-      }
     } else {
-      aiChatWindow.style.bottom = '100px'; aiChatWindow.style.right = '16px';
-      aiChatWindow.style.left = 'auto'; aiChatWindow.style.top = 'auto';
-      aiChatWindow.style.width = '380px'; aiChatWindow.style.height = '480px';
-      aiChatWindow.style.maxWidth = '90vw'; aiChatWindow.style.maxHeight = 'calc(100vh - 120px)';
-      aiChatWindow.style.borderRadius = '1rem';
-      aiChatWindow.classList.remove('chat-expanded');
-      if (expandButtonSvg) expandButtonSvg.style.transform = 'rotate(0deg)';
-      if (aiExpandedLogo) aiExpandedLogo.classList.add('hidden');
-      if (chatMessages?.querySelector('h2.initial-prompt-title')) {
-        chatMessages.classList.add('items-center', 'justify-center', 'text-center');
-        chatMessages.classList.remove('items-start', 'justify-start', 'text-left');
-      } else {
         chatMessages?.classList.remove('items-center', 'justify-center', 'text-center');
         chatMessages?.classList.add('items-start', 'justify-start', 'text-left');
-      }
     }
   }
 
   async function sendChatMessage() {
     if (!browser) return;
-    const chatInput = document.getElementById('chatInput') as HTMLInputElement | null;
+    const chatInputEl = document.getElementById('chatInput') as HTMLInputElement | null;
     const chatMessages = document.getElementById('chatMessages');
-    if (!chatInput || !chatMessages) return;
-    const userMsgText = chatInput.value.trim();
+    if (!chatInputEl || !chatMessages) return;
+    const userMsgText = chatInputEl.value.trim();
     if (!userMsgText) return;
 
     const aiContextPreamble = `You are Synthia, a helpful AI assistant integrated into the Microtask productivity app. Keep your answers concise and relevant to task management, scheduling, note-taking, and general productivity. The user's name is ${username || 'User'}. Today's date is ${new Date().toLocaleDateString()}. \n\nUser query: `;
@@ -375,14 +421,10 @@
     const initialPromptDiv = chatMessages.querySelector('.initial-prompt');
     if (initialPromptDiv) {
       initialPromptDiv.remove();
-      chatMessages.classList.remove('justify-center', 'items-center', 'text-center');
-      chatMessages.classList.add('justify-start', 'items-start', 'text-left');
-      if (isChatExpanded && document.getElementById('aiExpandedLogo')) {
-           document.getElementById('aiExpandedLogo')?.classList.add('hidden');
-       }
+      updateChatWindowStyle(); 
     }
     chatMessages.appendChild(userMsgDiv);
-    chatInput.value = "";
+    chatInputEl.value = "";
     chatMessages.scrollTop = chatMessages.scrollHeight;
 
     const typingIndicator = document.createElement('div');
@@ -393,110 +435,66 @@
     chatMessages.scrollTop = chatMessages.scrollHeight;
 
     try {
-      const response = await fetch("/api/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+      const response = await fetch("/api/chat", { 
+        method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ message: fullMessageToSend })
       });
       typingIndicator.remove();
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({ error: `API request failed with status ${response.status}` }));
-        throw new Error(errorData.error || `API request failed with status ${response.status}`);
+        throw new Error(errorData.error || `API request failed: ${response.status}`);
       }
       const responseData = await response.json();
       if (responseData.error) { throw new Error(responseData.error); }
       const aiReplyText = responseData?.reply || "Hmm, I couldn't get a response this time.";
-      let formattedReply = aiReplyText
-        .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-        .replace(/\*(.*?)\*/g, '<em>$1</em>')
-        .replace(/`([^`]+)`/g, '<code>$1</code>')
-        .replace(/\n/g, '<br>');
+      let formattedReply = aiReplyText.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>').replace(/\*(.*?)\*/g, '<em>$1</em>').replace(/`([^`]+)`/g, '<code>$1</code>').replace(/\n/g, '<br>');
       const aiMsgDiv = document.createElement('div');
       aiMsgDiv.className = `p-2 rounded-lg text-sm self-start max-w-[75%] mb-2 break-words ${isDarkMode ? 'bg-zinc-700 text-zinc-200' : 'bg-gray-200 text-gray-800'}`;
       aiMsgDiv.innerHTML = formattedReply;
       chatMessages.appendChild(aiMsgDiv);
-      chatMessages.scrollTop = chatMessages.scrollHeight;
     } catch (error: any) {
-      console.error("[Home Page / +page.svelte] Chat API error:", error);
       const errorMsgDiv = document.createElement('div');
       errorMsgDiv.className = `p-2 rounded-lg text-sm self-start max-w-[75%] mb-2 ${isDarkMode ? 'bg-red-800 text-red-200' : 'bg-red-100 text-red-700'}`;
-      errorMsgDiv.textContent = error.message || "Oops! Something went wrong fetching Synthia's response.";
-      const currentTypingIndicator = document.getElementById('aiTyping');
-      if (currentTypingIndicator?.parentNode) currentTypingIndicator.remove();
+      errorMsgDiv.textContent = error.message || "Oops! Something went wrong with the chat.";
+      if(document.getElementById('aiTyping')) document.getElementById('aiTyping')?.remove();
       chatMessages.appendChild(errorMsgDiv);
-      chatMessages.scrollTop = chatMessages.scrollHeight;
+    } finally {
+        if(chatMessages) chatMessages.scrollTop = chatMessages.scrollHeight;
     }
   }
 
   async function refreshData() {
-    isRefreshingNotes = true;
-    isRefreshingTasks = true;
-    errorMessage = null;
-    try {
-      await invalidateAll();
-    } catch (err) {
-      console.error('[Home Page / +page.svelte] Error during invalidateAll:', err);
-      errorMessage = 'Failed to refresh data. Please try again.';
-    } finally {
-      isRefreshingNotes = false;
-      isRefreshingTasks = false;
-    }
+    isRefreshingNotes = true; isRefreshingTasks = true; errorMessage = null;
+    try { await invalidateAll(); } 
+    catch (err) { errorMessage = 'Failed to refresh data. Please try again.'; } 
+    finally { isRefreshingNotes = false; isRefreshingTasks = false; }
   }
-
-  function confirmDelete() {
+  function confirmDelete() { 
     const noteModalForm = document.querySelector<HTMLFormElement>('#note-modal-form');
-    if (!noteModalForm) {
-      console.error("[Home Page / +page.svelte] CRITICAL: Note modal form not found by ID during confirmDelete.");
-      errorMessage = "Error: Could not find the note form to process deletion. Please try again or refresh.";
-      showDeleteConfirmation = false;
-      return;
-    }
-    if (!editingNoteId) {
-      console.error("[Home Page / +page.svelte] Attempted to delete note without an editingNoteId.");
-      errorMessage = "Cannot delete note: No note was selected for editing. Please close and try again.";
-      showDeleteConfirmation = false;
-      return;
-    }
+    if (!noteModalForm || !editingNoteId) return; 
     showDeleteConfirmation = false;
-
     const tempDeleteButton = document.createElement('button');
-    tempDeleteButton.type = 'submit';
-    tempDeleteButton.formAction = `?/deleteNote`;
+    tempDeleteButton.type = 'submit'; tempDeleteButton.formAction = `?/deleteNote`;
     tempDeleteButton.style.display = 'none';
     noteModalForm.appendChild(tempDeleteButton);
-    // console.log(`[Home Page / +page.svelte] Submitting delete for note ID: ${editingNoteId} using form:`, noteModalForm);
     tempDeleteButton.click();
     noteModalForm.removeChild(tempDeleteButton);
   }
 
-  onMount(() => {
-    if (!data?.tasks || data.tasks.length === 0) {
-      noTasksTodayMessage = getRandomMessage();
-    }
-    username = getStoredUsername();
-    greeting = getGreeting();
+  let globalMouseMoveListener: ((event: MouseEvent) => void) | null = null;
+  let globalMouseUpListener: (() => void) | null = null;
 
+  onMount(() => {
+    if (!data?.tasks || data.tasks.length === 0) noTasksTodayMessage = getRandomMessage();
+    // username is now set reactively from `data` prop
+    greeting = getGreeting();
     if (browser) {
       const savedTheme = localStorage.getItem('theme');
       const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
       isDarkMode = savedTheme === 'dark' || (!savedTheme && prefersDark);
       document.body.classList.toggle('dark', isDarkMode);
     }
-
-    fetchUsernameFromFirebase().then(() => {
-      if (browser) {
-        const params = new URLSearchParams($page.url.searchParams);
-        usernameFromUrl = params.get('username') || '';
-        if (usernameFromUrl) {
-          username = usernameFromUrl;
-          saveUsername(username);
-          const url = new URL(window.location.href);
-          url.searchParams.delete('username');
-          window.history.replaceState({}, '', url.toString());
-        }
-      }
-    });
-
+    // fetchUsernameFromFirebase() call is removed
     const setupIconListener = (iconId: string, windowId: string) => {
         const iconElement = document.getElementById(iconId);
         if (iconElement) {
@@ -506,19 +504,15 @@
             closeOtherWindows(windowId);
           });
         }
-      };
+    };
     setupIconListener('bellIcon', 'notifWindow');
     setupIconListener('helpIcon', 'helpWindow');
     setupIconListener('profileIcon', 'profileWindow');
-
     const darkModeButton = document.getElementById('darkModeToggle');
     if (darkModeButton) darkModeButton.addEventListener('click', toggleDarkMode);
-
-    // Dots menus removed, so related listeners are also removed.
-
+    
     const handleGlobalClick = (event: MouseEvent) => {
       const target = event.target as Node | null;
-      // Header dropdown closing logic
       let isClickInsideHeaderDropdownTrigger = false;
       const headerTriggerIds = ['bellIcon', 'helpIcon', 'profileIcon'];
       headerTriggerIds.forEach(triggerId => {
@@ -533,7 +527,6 @@
       if (!isClickInsideHeaderDropdownTrigger && !isClickInsideHeaderDropdownWindow) {
         closeOtherWindows('');
       }
-      // Sidebar closing logic
       const sidebarEl = document.getElementById('sidebar');
       const hamburgerButton = document.getElementById('hamburgerButton');
       if (isSidebarOpen && sidebarEl && !sidebarEl.contains(target) && hamburgerButton && !hamburgerButton.contains(target)) {
@@ -543,44 +536,53 @@
     document.addEventListener('click', handleGlobalClick);
     document.addEventListener('keydown', handleEscKey);
 
-    const aiChatToggle = document.getElementById('aiChatToggle');
-    const aiChatWindow = document.getElementById('aiChatWindow');
+    const aiChatToggleEl = document.getElementById('aiChatToggle');
+    chatWindowElement = document.getElementById('aiChatWindow');
     const closeChat = document.getElementById('closeChat');
-    const expandChat = document.getElementById('expandChat');
     const sendBtn = document.getElementById('sendChat');
-    const chatInput = document.getElementById('chatInput') as HTMLInputElement | null;
+    const chatInputEl = document.getElementById('chatInput') as HTMLInputElement | null;
 
-    if (aiChatToggle && aiChatWindow) {
-      aiChatToggle.addEventListener('click', (e) => {
+    if (aiChatToggleEl && chatWindowElement) {
+      aiChatToggleEl.addEventListener('click', (e) => {
         e.stopPropagation();
-        const currentlyHidden = aiChatWindow.classList.contains('hidden');
-        aiChatWindow.classList.toggle('hidden', !currentlyHidden);
-        updateChatWindowStyle();
-      });
-    }
-    if (closeChat && aiChatWindow) {
-      closeChat.addEventListener('click', () => {
-        aiChatWindow.classList.add('hidden');
-        if (isChatExpanded) {
-          isChatExpanded = false;
-          updateChatWindowStyle();
+        const currentlyHidden = chatWindowElement!.classList.contains('hidden');
+        chatWindowElement!.classList.toggle('hidden', !currentlyHidden);
+        if (!currentlyHidden && isDragging) onDragMouseUp(); 
+        if (!currentlyHidden && isResizing) onResizeMouseUp();
+        updateChatWindowStyle(); 
+        if(currentlyHidden && aiSpeechBubbleElement?.classList.contains('visible')) { 
+            aiSpeechBubbleElement.classList.remove('visible');
         }
       });
     }
-    if (expandChat) {
-      expandChat.addEventListener('click', () => {
-        isChatExpanded = !isChatExpanded;
-        updateChatWindowStyle();
+    if (closeChat && chatWindowElement) {
+      closeChat.addEventListener('click', () => { 
+        chatWindowElement!.classList.add('hidden');
+        if (isDragging) onDragMouseUp(); if (isResizing) onResizeMouseUp();
       });
     }
-    if (sendBtn && chatInput) {
-      sendBtn.addEventListener('click', sendChatMessage);
-      chatInput.addEventListener('keypress', (event) => {
-        if (event.key === 'Enter' && !event.shiftKey) {
-          event.preventDefault();
-          sendChatMessage();
-        }
-      });
+    if (sendBtn && chatInputEl) { 
+        sendBtn.addEventListener('click', sendChatMessage);
+        chatInputEl.addEventListener('keypress', (event) => {
+            if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); sendChatMessage(); }
+        });
+    }
+    
+    chatHeaderElement = document.getElementById('aiChatHeader');
+    resizeHandleElement = document.getElementById('resizeHandle');
+    aiSpeechBubbleElement = document.getElementById('aiSpeechBubble');
+
+    if (chatHeaderElement) chatHeaderElement.addEventListener('mousedown', onDragMouseDown);
+    if (resizeHandleElement) resizeHandleElement.addEventListener('mousedown', onResizeMouseDown);
+    
+    globalMouseMoveListener = (event) => { if (isDragging) onDragMouseMove(event); if (isResizing) onResizeMouseMove(event); };
+    globalMouseUpListener = () => { if (isDragging) onDragMouseUp(); if (isResizing) onResizeMouseUp(); };
+    document.addEventListener('mousemove', globalMouseMoveListener);
+    document.addEventListener('mouseup', globalMouseUpListener);
+
+    if (aiSpeechBubbleElement) { 
+      aiBubbleIntervalId = window.setInterval(showRandomAiSpeechBubble, 10000); 
+      showRandomAiSpeechBubble(); 
     }
 
     updateChatWindowStyle();
@@ -590,7 +592,12 @@
       clearInterval(greetingIntervalId);
       document.removeEventListener('click', handleGlobalClick);
       document.removeEventListener('keydown', handleEscKey);
-      // Minimal cleanup, Svelte handles most DOM element listener removal
+      if (chatHeaderElement) chatHeaderElement.removeEventListener('mousedown', onDragMouseDown);
+      if (resizeHandleElement) resizeHandleElement.removeEventListener('mousedown', onResizeMouseDown);
+      if (globalMouseMoveListener) document.removeEventListener('mousemove', globalMouseMoveListener);
+      if (globalMouseUpListener) document.removeEventListener('mouseup', globalMouseUpListener);
+      if (aiBubbleIntervalId) clearInterval(aiBubbleIntervalId);
+      if (aiBubbleTimeoutId) clearTimeout(aiBubbleTimeoutId);
     };
   });
 </script>
@@ -625,6 +632,23 @@
             </svg>
             <span>Home</span>
           </a>
+          <a href="/dashboard" 
+             class="flex items-center gap-3 px-3 py-2 rounded-md font-semibold transition-colors duration-150"
+             class:bg-blue-600={!isDarkMode && $page.url.pathname === '/dashboard'} 
+             class:bg-blue-800={isDarkMode && $page.url.pathname === '/dashboard'} 
+             class:text-white={$page.url.pathname === '/dashboard'}
+             class:text-gray-700={!isDarkMode && $page.url.pathname !== '/dashboard'}
+             class:text-zinc-300={isDarkMode && $page.url.pathname !== '/dashboard'}
+             class:hover:bg-gray-100={!isDarkMode} 
+             class:hover:bg-zinc-700={isDarkMode}
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-5 h-5" aria-hidden="true">
+              <path d="M10.5 4.5a1.5 1.5 0 00-3 0v15a1.5 1.5 0 003 0V4.5z" />
+              <path d="M4.5 10.5a1.5 1.5 0 000 3h15a1.5 1.5 0 000-3h-15z" /> 
+              <path fill-rule="evenodd" d="M1.5 3A1.5 1.5 0 013 1.5h18A1.5 1.5 0 0122.5 3v18a1.5 1.5 0 01-1.5 1.5H3A1.5 1.5 0 011.5 21V3zm1.5.75v16.5h16.5V3.75H3z" clip-rule="evenodd" />
+            </svg>
+            <span>Dashboard</span>
+          </a>
           <a href="/tasks" class="flex items-center gap-3 px-3 py-2 rounded-md font-semibold transition-colors duration-150" class:hover:bg-gray-100={!isDarkMode} class:hover:bg-zinc-700={isDarkMode} class:text-gray-700={!isDarkMode} class:text-zinc-300={isDarkMode}>
             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5" aria-hidden="true">
               <path stroke-linecap="round" stroke-linejoin="round" d="M9 12h3.75M9 15h3.75M9 18h3.75m3 .75H18a2.25 2.25 0 0 0 2.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 0 0-1.123-.08m-5.801 0c-.065.21-.1.433-.1.664 0 .414.336.75.75.75h4.5a.75.75 0 0 0 .75-.75 2.25 2.25 0 0 0-.1-.664m-5.8 0A2.251 2.251 0 0 1 13.5 2.25H15c1.012 0 1.867.668 2.15 1.586m-5.8 0c-.376.023-.75.05-1.124.08C9.095 4.01 8.25 4.973 8.25 6.108V8.25m0 0H4.875c-.621 0-1.125.504-1.125 1.125v11.25c0 .621.504 1.125 1.125 1.125h9.75c.621 0 1.125-.504 1.125-1.125V9.375c0-.621-.504-1.125-1.125-1.125H8.25ZM6.75 12h.008v.008H6.75V12Zm0 3h.008v.008H6.75V15Zm0 3h.008v.008H6.75V18Z" />
@@ -656,7 +680,6 @@
   {/if}
 
   <div class="flex-1 flex flex-col overflow-hidden">
-
     <header class={`top-header ${isDarkMode ? 'bg-zinc-800 border-zinc-700' : 'bg-white border-gray-200'}`}>
       <div class="header-left">
         <button id="hamburgerButton" class="menu-btn" on:click={toggleSidebar} aria-label="Toggle Sidebar">
@@ -745,17 +768,16 @@
           <div class={`border rounded-lg p-4 shadow-sm relative flex flex-col ${isDarkMode ? 'bg-zinc-700 border-zinc-600' : 'bg-white border-gray-200'}`}>
             <div class="flex justify-between items-center mb-3 flex-shrink-0">
               <h2 class={`text-lg font-semibold ${isDarkMode ? 'text-zinc-100' : 'text-gray-700'}`}>Tasks that are due today</h2>
-              <!-- Optionally, add a button here if toggleShowCompleted is needed -->
             </div>
             <div class="space-y-2 flex-grow overflow-y-auto mb-4 pr-2 -mr-2 custom-scrollbar">
               {#if data?.tasks && data.tasks.length > 0}
                 {#each data.tasks as task (task.id)}
                   <form
-  method="POST"
-  action="?/toggleTask"
-  use:enhance={taskFormEnhanceCallback}
-  class={`flex justify-between items-center rounded-lg px-4 py-2 shadow-xs ${isDarkMode ? 'bg-zinc-600 border border-zinc-500' : 'bg-white border-gray-200'}`}
->
+                    method="POST"
+                    action="?/toggleTask"
+                    use:enhance={taskFormEnhanceCallback}
+                    class={`flex justify-between items-center rounded-lg px-4 py-2 shadow-xs ${isDarkMode ? 'bg-zinc-600 border border-zinc-500' : 'bg-white border-gray-200'}`}
+                  >
                     <input type="hidden" name="id" value={task.id} />
                     <div class="flex items-center gap-2 flex-grow mr-2 overflow-hidden">
                       <input
@@ -880,32 +902,30 @@
         </section>
       </main>
 
-      <button class={`fixed bottom-4 left-4 w-16 h-16 rounded-full shadow-lg flex items-center justify-center hover:scale-110 transition-transform z-30 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 ${isDarkMode ? 'bg-zinc-700' : 'bg-white'}`} aria-label="Open Timer">
-        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-10 h-10" class:text-zinc-800={!isDarkMode} class:text-zinc-300={isDarkMode} aria-hidden="true"><path fill-rule="evenodd" d="M12 2.25c-5.385 0-9.75 4.365-9.75 9.75s4.365 9.75 9.75 9.75 9.75-4.365 9.75-9.75S17.385 2.25 12 2.25zM12.75 6a.75.75 0 00-1.5 0v6c0 .414.336.75.75.75h4.5a.75.75 0 000-1.5h-3.75V6z" clip-rule="evenodd" /></svg>
-      </button>
-
-      <div id="aiChatToggle" class="fixed bottom-4 right-4 w-16 h-16 cursor-pointer z-40 transition-opacity duration-200">
+      <div id="aiChatToggle" class="fixed bottom-10 left-16 w-16 h-16 cursor-pointer z-40 transition-opacity duration-200">
         <button class="w-full h-full bg-purple-600 rounded-full shadow-lg flex items-center justify-center hover:bg-purple-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-purple-500 transform hover:scale-105 transition-all duration-150" aria-label="Toggle AI Chat">
-          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-9 h-9 text-white" aria-hidden="true"><path d="M12.001 2.504a2.34 2.34 0 00-2.335 2.335v.583c0 .582.212 1.13.582 1.556l.03.035-.03.034a2.34 2.34 0 00-2.917 3.916A3.287 3.287 0 004.08 14.25a3.287 3.287 0 003.287 3.287h8.266a3.287 3.287 0 003.287-3.287 3.287 3.287 0 00-1.253-2.583 2.34 2.34 0 00-2.917-3.916l-.03-.034.03-.035c.37-.425.582-.973.582-1.555v-.583a2.34 2.34 0 00-2.335-2.336h-.002zM9.75 12.75a.75.75 0 000 1.5h4.5a.75.75 0 000-1.5h-4.5z" /><path fill-rule="evenodd" d="M12 1.5c5.79 0 10.5 4.71 10.5 10.5S17.79 22.5 12 22.5 1.5 17.79 1.5 12 6.21 1.5 12 1.5zM2.85 12a9.15 9.15 0 019.15-9.15 9.15 9.15 0 019.15 9.15 9.15 9.15 0 01-9.15 9.15A9.15 9.15 0 012.85 12z" clip-rule="evenodd" /></svg>
+          <img src="/Ai.png" alt="Ask Synthia AI" class="w-9 h-9" />
         </button>
+        <div id="aiSpeechBubble" class="ai-speech-bubble">
+         
+        </div>
       </div>
 
-      <div id="aiChatWindow" class={`fixed transition-all duration-300 ease-in-out rounded-lg shadow-xl hidden z-[70] flex flex-col overflow-hidden ${isDarkMode ? 'bg-zinc-800 border border-zinc-700 text-zinc-300' : 'bg-white border border-gray-200 text-gray-800'}`} style="bottom: 100px; right: 16px; width: 380px; height: 480px; max-width: 90vw; max-height: 80vh;">
+      <div 
+        id="aiChatWindow" 
+        class={`fixed transition-all duration-300 ease-in-out rounded-lg shadow-xl hidden z-[70] flex flex-col overflow-hidden ${isDarkMode ? 'bg-zinc-800 border-zinc-700 text-zinc-300' : 'bg-white border-gray-200 text-gray-800'}`} 
+        style="bottom: 100px; left: 16px; width: 380px; height: 480px; max-width: 90vw; max-height: calc(100vh - 120px);"
+      >
         <div id="aiExpandedLogo" class="hidden absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 opacity-5 pointer-events-none">
            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-48 h-48 sm:w-64 sm:h-64" aria-hidden="true"><path d="M12.001 2.504a2.34 2.34 0 00-2.335 2.335v.583c0 .582.212 1.13.582 1.556l.03.035-.03.034a2.34 2.34 0 00-2.917 3.916A3.287 3.287 0 004.08 14.25a3.287 3.287 0 003.287 3.287h8.266a3.287 3.287 0 003.287-3.287 3.287 3.287 0 00-1.253-2.583 2.34 2.34 0 00-2.917-3.916l-.03-.034.03-.035c.37-.425.582-.973.582-1.555v-.583a2.34 2.34 0 00-2.335-2.336h-.002zM9.75 12.75a.75.75 0 000 1.5h4.5a.75.75 0 000-1.5h-4.5z" /><path fill-rule="evenodd" d="M12 1.5c5.79 0 10.5 4.71 10.5 10.5S17.79 22.5 12 22.5 1.5 17.79 1.5 12 6.21 1.5 12 1.5zM2.85 12a9.15 9.15 0 019.15-9.15 9.15 9.15 0 019.15 9.15 9.15 9.15 0 01-9.15 9.15A9.15 9.15 0 012.85 12z" clip-rule="evenodd" /></svg>
         </div>
-        <div class={`flex justify-between items-center px-3 py-2 border-b flex-shrink-0 ${isDarkMode ? 'bg-zinc-700 border-zinc-600' : 'bg-gray-50 border-gray-200'}`}>
-          <button class={`p-1.5 rounded-md ${isDarkMode ? 'hover:bg-zinc-600 text-zinc-400' : 'hover:bg-gray-200 text-gray-500'}`} aria-label="Chat History">
-            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"> <path stroke-linecap="round" stroke-linejoin="round" d="M12 6.042A8.967 8.967 0 0 0 6 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 0 1 6 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 0 1 6-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0 0 18 18a8.967 8.967 0 0 0-6 2.292m0-14.25v14.25" /> </svg>
-          </button>
-          <span class="text-sm font-semibold">Ask Synthia</span>
-          <div class="flex items-center gap-1">
-            <button class={`p-1.5 rounded-md ${isDarkMode ? 'hover:bg-zinc-600 text-zinc-400' : 'hover:bg-gray-200 text-gray-500'}`} aria-label="Chat Options">
-               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-5 h-5" aria-hidden="true"><path d="M10 3a1.5 1.5 0 110 3 1.5 1.5 0 010-3zM10 8.5a1.5 1.5 0 110 3 1.5 1.5 0 010-3zM11.5 15.5a1.5 1.5 0 10-3 0 1.5 1.5 0 003 0z" /></svg>
-            </button>
-            <button id="expandChat" class={`p-1.5 rounded-md ${isDarkMode ? 'hover:bg-zinc-600 text-zinc-400' : 'hover:bg-gray-200 text-gray-500'}`} aria-label="Expand/Collapse Chat">
-              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-5 h-5 transition-transform duration-200" aria-hidden="true"><path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 10.94l3.71-3.71a.75.75 0 111.06 1.06l-4.25 4.25a.75.75 0 01-1.06 0L5.23 8.29a.75.75 0 01.02-1.06z" clip-rule="evenodd" /></svg>
-            </button>
+        <div 
+          id="aiChatHeader" 
+          class={`flex justify-between items-center px-3 py-2 border-b flex-shrink-0 ${isDarkMode ? 'bg-zinc-700 border-zinc-600' : 'bg-gray-50 border-gray-200'}`}
+        >
+          <div class="w-8"></div> 
+          <span class="text-sm font-semibold flex-grow text-center">Ask Synthia</span>
+          <div class="flex items-center">
             <button id="closeChat" class={`p-1.5 rounded-md ${isDarkMode ? 'hover:bg-zinc-600 text-zinc-400' : 'hover:bg-gray-200 text-gray-500'}`} aria-label="Close Chat">
               <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-5 h-5"> <path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12" /> </svg>
             </button>
@@ -915,11 +935,7 @@
           <div class="initial-prompt w-full h-full flex flex-col justify-center items-center text-center">
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-16 h-16 mb-4 opacity-50" aria-hidden="true"><path d="M12.001 2.504a2.34 2.34 0 00-2.335 2.335v.583c0 .582.212 1.13.582 1.556l.03.035-.03.034a2.34 2.34 0 00-2.917 3.916A3.287 3.287 0 004.08 14.25a3.287 3.287 0 003.287 3.287h8.266a3.287 3.287 0 003.287-3.287 3.287 3.287 0 00-1.253-2.583 2.34 2.34 0 00-2.917-3.916l-.03-.034.03-.035c.37-.425.582-.973.582-1.555v-.583a2.34 2.34 0 00-2.335-2.336h-.002zM9.75 12.75a.75.75 0 000 1.5h4.5a.75.75 0 000-1.5h-4.5z" /><path fill-rule="evenodd" d="M12 1.5c5.79 0 10.5 4.71 10.5 10.5S17.79 22.5 12 22.5 1.5 17.79 1.5 12 6.21 1.5 12 1.5zM2.85 12a9.15 9.15 0 019.15-9.15 9.15 9.15 0 019.15 9.15 9.15 9.15 0 01-9.15 9.15A9.15 9.15 0 012.85 12z" clip-rule="evenodd" /></svg>
             <h2 class="text-lg font-semibold mb-3 initial-prompt-title">How can I help?</h2>
-            <div class="flex flex-wrap justify-center gap-2">
-              <button class="prompt-button">Create Task</button>
-              <button class="prompt-button">Summarize Notes</button>
-              <button class="prompt-button">Help using AI</button>
-            </div>
+            
           </div>
         </div>
         <div class={`px-4 py-3 border-t flex-shrink-0 ${isDarkMode ? 'bg-zinc-700 border-zinc-600' : 'bg-gray-50 border-gray-200'}`}>
@@ -930,6 +946,7 @@
             </button>
           </div>
         </div>
+        <div id="resizeHandle" class="absolute bottom-0 right-0 w-4 h-4 cursor-nwse-resize z-10"></div>
       </div>
     </div>
   </div>
@@ -1018,14 +1035,9 @@
             {#if editingNoteId}
               <button
                 type="button" 
-                on:click={(event) => {
-                  event.preventDefault(); 
-                  showDeleteConfirmation = true;
-                }}
+                on:click={(event) => { event.preventDefault(); showDeleteConfirmation = true; }}
                 class="w-full sm:w-auto px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 transition-colors duration-150 order-3 sm:order-1"
-              >
-                Delete
-              </button>
+              > Delete </button>
             {/if}
             <button type="button" class={`w-full sm:w-auto px-4 py-2 rounded-md focus:outline-none focus:ring-2 focus:ring-offset-2 transition-colors duration-150 order-2 sm:order-2 ${isDarkMode ? 'bg-zinc-600 text-zinc-300 hover:bg-zinc-500 focus:ring-zinc-500' : 'bg-gray-200 text-gray-800 hover:bg-gray-300 focus:ring-gray-400'}`} on:click={closeForm}> Cancel </button>
             <button type="submit" class="w-full sm:w-auto px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-colors duration-150 order-1 sm:order-3"> {editingNoteId ? 'Update Note' : 'Add Note'} </button>
@@ -1046,9 +1058,7 @@
         on:click|stopPropagation transition:scale={{ duration: 200, start: 0.95, opacity: 0.5 }}
       >
         <div class={`flex justify-between items-center p-4 sm:p-5 border-b flex-shrink-0 ${isDarkMode ? 'border-zinc-700' : 'border-gray-200'}`}>
-          <h3 id="task-modal-title" class="text-lg sm:text-xl font-semibold">
-            Add New Task
-          </h3>
+          <h3 id="task-modal-title" class="text-lg sm:text-xl font-semibold"> Add New Task </h3>
           <button
             type="button"
             class={`p-1 rounded-full focus:outline-none focus:ring-2 focus:ring-offset-2 transition-colors duration-150 ${isDarkMode ? 'text-zinc-400 hover:bg-zinc-700 focus:ring-zinc-600' : 'text-gray-400 hover:bg-gray-100 hover:text-gray-600 focus:ring-gray-400'}`}
@@ -1101,7 +1111,6 @@
             <input type="text" id="task-tags" name="tags" bind:value={taskTags} placeholder="e.g., work, personal, urgent" class={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-sm ${isDarkMode ? 'bg-zinc-700 border-zinc-600 text-zinc-300 placeholder-zinc-500' : 'border-gray-300 text-gray-800 placeholder-gray-400'}`} />
           </div>
 
-
         <div class={`flex flex-col sm:flex-row justify-end gap-3 mt-auto pt-4 border-t -mx-4 -mb-4 sm:-mx-5 sm:-mb-5 px-4 py-3 sm:px-5 sm:py-3 rounded-b-lg flex-shrink-0 ${isDarkMode ? 'bg-zinc-700 border-zinc-600' : 'bg-gray-50 border-gray-200'}`}>
           <button type="button" class={`w-full sm:w-auto px-4 py-2 rounded-md focus:outline-none focus:ring-2 focus:ring-offset-2 transition-colors duration-150 ${isDarkMode ? 'bg-zinc-600 text-zinc-300 hover:bg-zinc-500 focus:ring-zinc-500' : 'bg-gray-200 text-gray-800 hover:bg-gray-300 focus:ring-gray-400'}`} on:click={closeTaskForm}> Cancel </button>
           <button type="submit" class="w-full sm:w-auto px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-colors duration-150"> Add Task </button>
@@ -1117,15 +1126,9 @@
   .font-sans {
     font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   }
-
   :global(body, html) {
-    height: 100%;
-    margin: 0;
-    padding: 0;
-    overflow: hidden; /* Prevent scrollbars on body */
+    height: 100%; margin: 0; padding: 0; overflow: hidden; 
   }
-
-  /* Custom Scrollbars */
   ::-webkit-scrollbar { width: 6px; height: 6px; }
   ::-webkit-scrollbar-track { background: #f1f1f1; border-radius: 3px; }
   ::-webkit-scrollbar-thumb { background: #c5c5c5; border-radius: 3px; }
@@ -1136,8 +1139,6 @@
   :global(.dark) ::-webkit-scrollbar-thumb:hover { background: #718096; }
   :global(.dark) .custom-scrollbar { scrollbar-color: #4a5568 #2d3748; }
 
-
-  /* Header Styles */
   .top-header {
     position: fixed; top: 0; left: 0; right: 0;
     display: flex; align-items: center; justify-content: space-between;
@@ -1149,18 +1150,15 @@
   .top-header .menu-btn {
     background: none; border: none; cursor: pointer; padding: 0.5rem;
     border-radius: 9999px; transition: background-color 0.15s ease;
-    display: flex; align-items: center; justify-content: center; /* For SVG centering */
+    display: flex; align-items: center; justify-content: center;
   }
-  .top-header .menu-btn:hover { background-color: #f3f4f6; } /* Light mode */
-  :global(.dark) .top-header .menu-btn:hover { background-color: #374151; } /* Dark mode */
-  /* Removed direct img styling from .menu-btn img */
-
+  .top-header .menu-btn:hover { background-color: #f3f4f6; } 
+  :global(.dark) .top-header .menu-btn:hover { background-color: #374151; } 
   .top-header .logo {
     display: flex; align-items: center; gap: 0.5rem;
     font-weight: 600; font-size: 1.125rem; text-decoration: none;
   }
-  .top-header .logo img { height: 2rem; width: auto; } /* Keep for logonamin.png */
-
+  .top-header .logo img { height: 2rem; width: auto; } 
   .top-header .header-icons { display: flex; align-items: center; gap: 0.25rem; }
   .top-header .header-icons button {
     background: none; border: none; cursor: pointer; padding: 0.5rem;
@@ -1170,7 +1168,6 @@
   }
   .top-header .header-icons button:hover { background-color: #f3f4f6; } 
   :global(.dark) .top-header .header-icons button:hover { background-color: #374151; } 
-
   .relative { position: relative; }
   .dropdown-window {
     position: absolute; right: 0; top: calc(100% + 8px);
@@ -1185,43 +1182,62 @@
     pointer-events: auto; visibility: visible;
   }
 
-  /* AI Chat Styles */
-  #aiChatWindow .prompt-button {
-      display: inline-flex; align-items: center; justify-content: center;
-      gap: 0.5rem; font-size: 0.875rem; font-weight: 500;
-      padding: 0.5rem 1rem; border-radius: 0.375rem;
-      border: 1px solid; /* Color will be set by dark/light mode classes */
-      transition: background-color 0.15s ease; cursor: pointer;
-      width: auto; max-width: 200px; text-align: center; margin: 0.25rem;
+  .ai-speech-bubble {
+    position: absolute;
+    bottom: calc(100% + 8px); 
+    left: 50%;
+    transform: translateX(-50%) translateY(10px); 
+    background-color: white;
+    color: #374151; 
+    padding: 8px 12px;
+    border-radius: 8px;
+    box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1), 0 2px 4px -1px rgba(0,0,0,0.06);
+    font-size: 0.8rem;
+    font-weight: 500;
+    white-space: nowrap;
+    z-index: 45; 
+    opacity: 0;
+    transition: opacity 0.3s ease-in-out, transform 0.3s ease-in-out;
+    pointer-events: none; 
   }
-  /* Light mode prompt button */
-  #aiChatWindow .prompt-button { border-color: #e5e7eb; background-color: #f9fafb; color: #374151; }
-  #aiChatWindow .prompt-button:hover { background-color: #f3f4f6; }
-  /* Dark mode prompt button */
-  :global(.dark) #aiChatWindow .prompt-button { border-color: #4b5563; background-color: #374151; color: #d1d5db; }
-  :global(.dark) #aiChatWindow .prompt-button:hover { background-color: #4b5563; }
+  .ai-speech-bubble.visible {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0px); 
+  }
+  .ai-speech-bubble::after { 
+    content: ""; position: absolute; top: 100%; left: 50%;
+    margin-left: -6px; border-width: 6px; border-style: solid;
+    border-color: white transparent transparent transparent;
+    transition: border-color 0.2s;
+  }
+  :global(.dark) .ai-speech-bubble {
+    background-color: #374151; color: #d1d5db; 
+    box-shadow: 0 4px 6px -1px rgba(0,0,0,0.3), 0 2px 4px -1px rgba(0,0,0,0.15);
+  }
+  :global(.dark) .ai-speech-bubble::after {
+    border-color: #374151 transparent transparent transparent;
+  }
 
-
+  #aiChatHeader { cursor: grab; }
+  #aiChatHeader.grabbing { cursor: grabbing !important; }
+  .user-select-none { user-select: none; -webkit-user-select: none; -ms-user-select: none; }
+  
   #chatMessages:not(:has(.initial-prompt)) .initial-prompt { display: none; }
-   #chatMessages > div:not(.initial-prompt) { /* Base style for messages */
+   #chatMessages > div:not(.initial-prompt) { 
       margin-bottom: 0.75rem; padding: 0.625rem 0.875rem;
       border-radius: 0.5rem; max-width: 80%;
       line-height: 1.4; word-wrap: break-word; box-shadow: 0 1px 2px rgba(0,0,0,0.05);
    }
-   /* User message specific styling */
-   #chatMessages > div[class*="bg-blue-500"], #chatMessages > div[class*="bg-blue-700"] { /* More general selector */
+   #chatMessages > div[class*="bg-blue-500"], #chatMessages > div[class*="bg-blue-700"] { 
       align-self: flex-end; margin-left: auto;
    }
-   /* AI reply specific styling */
-   #chatMessages > div[class*="bg-gray-200"], #chatMessages > div[class*="bg-zinc-700"] { /* More general selector */
+   #chatMessages > div[class*="bg-gray-200"], #chatMessages > div[class*="bg-zinc-700"] { 
       align-self: flex-start; margin-right: auto;
    }
-   /* Typing indicator */
     #chatMessages > #aiTyping {
       font-style: italic; box-shadow: none; padding: 0.5rem 0.875rem;
    }
-
-  .chat-expanded {
+  .chat-expanded { 
     display: flex !important; flex-direction: column;
     z-index: 1000 !important; border-radius: 0 !important;
     border: none !important; box-shadow: none !important;
@@ -1230,7 +1246,6 @@
     padding: 1rem 5% !important; overflow-y: auto;
     position: relative; z-index: 10; flex-grow: 1;
   }
-   /* Ensure correct alignment when messages exist in expanded view */
   .chat-expanded #chatMessages:not(:has(.initial-prompt)) {
     align-items: flex-start !important; justify-content: flex-start !important;
   }
@@ -1244,47 +1259,20 @@
       box-shadow: 0 1px 2px rgba(0,0,0,0.05);
       font-size: 1rem; padding: 0.75rem 3rem 0.75rem 1rem;
   }
-  #expandChat svg { transition: transform 0.3s ease; } /* Changed from img to svg */
-  .chat-expanded #expandChat svg { transform: rotate(180deg); }
-
   .hidden { display: none !important; }
-
-  /* Transitions (if needed, Svelte transitions are preferred) */
   @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
   @keyframes fade-out { from { opacity: 1; } to { opacity: 0; } }
-  /* .fade-enter-active { animation: fade-in 0.15s ease-out; } */
-  /* .fade-leave-active { animation: fade-out 0.15s ease-in; } */
-
-  /* General Dark Mode Overrides (many are handled by Tailwind's dark: prefix) */
   :global(.dark .top-header) { background-color: #1f2937; border-bottom-color: #374151; }
   :global(.dark .top-header .logo span) { color: #f3f4f6; }
   :global(.dark .dropdown-window) { background-color: #374151; border-color: #4b5563; color: #f3f4f6; }
   :global(.dark input), :global(.dark textarea), :global(.dark select) {
-    background-color: #374151 !important; /* More specific for inputs */
-    color: #f3f4f6 !important;
+    background-color: #374151 !important; color: #f3f4f6 !important;
     border-color: #4b5563 !important;
   }
-   :global(.dark input::placeholder), :global(.dark textarea::placeholder) {
-    color: #6b7280; /* Dark mode placeholder text */
-  }
-   :global(.dark .calendar-picker-dark::-webkit-calendar-picker-indicator) {
-    filter: invert(0.8);
-  }
-
-
-  /* Ensure SVGs in active sidebar links are white */
-  :global(a.bg-blue-600 svg),
-  :global(a.bg-blue-800 svg) {
-    fill: white !important; /* For fill-based SVGs */
-    stroke: white !important; /* For stroke-based SVGs */
-  }
-  /* Keep for any remaining IMG tags in active links */
-  :global(a.bg-blue-600 img),
-  :global(a.bg-blue-800 img) {
-    filter: brightness(0) invert(1);
-  }
-
-  /* Specific dark mode adjustments for Tailwind classes if needed */
+   :global(.dark input::placeholder), :global(.dark textarea::placeholder) { color: #6b7280; }
+   :global(.dark .calendar-picker-dark::-webkit-calendar-picker-indicator) { filter: invert(0.8); }
+  :global(a.bg-blue-600 svg), :global(a.bg-blue-800 svg) { fill: white !important; stroke: white !important; }
+  :global(a.bg-blue-600 img), :global(a.bg-blue-800 img) { filter: brightness(0) invert(1); }
   :global(.dark .bg-zinc-800) { background-color: #1f2937; }
   :global(.dark .bg-zinc-700) { background-color: #374151; }
   :global(.dark .border-zinc-700) { border-color: #374151; }
@@ -1294,10 +1282,10 @@
   :global(.dark .text-zinc-400) { color: #9ca3af; }
   :global(.dark .text-zinc-500) { color: #6b7280; }
   :global(.dark .bg-zinc-600) { background-color: #4b5563; }
-:global(.dark .hover\:bg-zinc-700:hover) { background-color: #4b5563; } /* Effective hover:bg-gray-600 for gray-700 elements */
-:global(.dark .hover\:bg-zinc-600:hover) { background-color: #6b7280; } /* Effective hover:bg-gray-500 for gray-600 elements (was custom dark #424c5a) */
-:global(.dark .hover\:bg-zinc-500:hover) { background-color: #6b7280; } /* NEW: Effective hover:bg-gray-500 for gray-500 elements (or for items on gray-600 that hover to gray-500) */
-:global(.dark .border-zinc-500) { border-color: #6b7280; }             /* gray-500 */
-:global(.dark .bg-blue-800) { background-color: #1d4ed8; }          /* Brighter blue for dark mode active (Tailwind blue-700) */
-:global(.dark .text-blue-400) { color: #60a5fa; }                   /* Standard Tailwind blue-400 */
+  :global(.dark .hover\:bg-zinc-700:hover) { background-color: #4b5563; } 
+  :global(.dark .hover\:bg-zinc-600:hover) { background-color: #6b7280; } 
+  :global(.dark .hover\:bg-zinc-500:hover) { background-color: #6b7280; } 
+  :global(.dark .border-zinc-500) { border-color: #6b7280; }            
+  :global(.dark .bg-blue-800) { background-color: #1d4ed8; }          
+  :global(.dark .text-blue-400) { color: #60a5fa; }                   
 </style>

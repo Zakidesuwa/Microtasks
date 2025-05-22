@@ -705,6 +705,23 @@
             </svg>
             <span>Home</span>
           </a>
+          <a href="/dashboard" 
+             class="flex items-center gap-3 px-3 py-2 rounded-md font-semibold transition-colors duration-150"
+             class:bg-blue-600={!isDarkMode && $page.url.pathname === '/dashboard'} 
+             class:bg-blue-800={isDarkMode && $page.url.pathname === '/dashboard'} 
+             class:text-white={$page.url.pathname === '/dashboard'}
+             class:text-gray-700={!isDarkMode && $page.url.pathname !== '/dashboard'}
+             class:text-zinc-300={isDarkMode && $page.url.pathname !== '/dashboard'}
+             class:hover:bg-gray-100={!isDarkMode} 
+             class:hover:bg-zinc-700={isDarkMode}
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-5 h-5" aria-hidden="true">
+              <path d="M10.5 4.5a1.5 1.5 0 00-3 0v15a1.5 1.5 0 003 0V4.5z" />
+              <path d="M4.5 10.5a1.5 1.5 0 000 3h15a1.5 1.5 0 000-3h-15z" /> 
+              <path fill-rule="evenodd" d="M1.5 3A1.5 1.5 0 013 1.5h18A1.5 1.5 0 0122.5 3v18a1.5 1.5 0 01-1.5 1.5H3A1.5 1.5 0 011.5 21V3zm1.5.75v16.5h16.5V3.75H3z" clip-rule="evenodd" />
+            </svg>
+            <span>Dashboard</span>
+          </a>
           <a href="/tasks"
              class={`flex items-center gap-3 px-3 py-2 rounded-md font-semibold transition-colors duration-150
                     ${$page.url.pathname === '/tasks' ? (isDarkMode ? 'bg-blue-700 text-white' : 'bg-blue-600 text-white') : (isDarkMode ? 'text-zinc-300 hover:bg-zinc-700' : 'text-gray-700 hover:bg-gray-100')}`}
