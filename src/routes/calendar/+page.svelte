@@ -442,7 +442,6 @@
             </div>
         </div>
       </main>
-       <footer class={`text-center text-xs py-4 mt-auto ${isDarkMode ? 'text-zinc-500' : 'text-gray-400'}`}>Microtask Calendar © {new Date().getFullYear()}</footer>
     </div>
   </div>
 

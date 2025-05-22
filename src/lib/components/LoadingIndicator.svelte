@@ -1,111 +1,175 @@
+<!-- src/lib/components/Loader.svelte -->
 <script lang="ts">
-	// No JavaScript logic is needed for this animation.
-</script>
-<style lang="scss">
-:root
-{
-	--duration: 1.5s;
-	--container-size: 250px;
-	--box-size: 33px;
-	--box-border-radius: 15%;
-}
+    export let type: 'circle' | 'triangle' | 'rect' = 'rect';
 
-html, body
-{
-	width: 100%;
-	height: 100%;
-	overflow: hidden;
-	margin: 0;
-	padding: 0;
-	display: flex;
-	justify-content: center;
-	align-items: center;
-}
-
-.container
-{
-	width: var(--container-size);
-	display: flex;
-	justify-content: space-between;
-	align-items: center;
-	position: relative;
-}
-
-.📦
-{
-	width: var(--box-size);
-	height: var(--box-size);
-	position: relative;
-	display: block;
-	transform-origin: -50% center;
-	border-radius: var(--box-border-radius);
-	
-	&:after
-	{
-		content: '';
-		width: 100%;
-		height: 100%;
-		position: absolute;
-		top: 0;
-		right: 0;
-		background-color: lightblue;
-		border-radius: var(--box-border-radius);
-		box-shadow: 0px 0px 10px 0px rgba(#1C9FFF, 0.4);
-	}
-	
-	&:nth-child(1)
-	{
-		animation: slide var(--duration) ease-in-out infinite alternate;
-		&:after{ animation: color-change var(--duration) ease-in-out infinite alternate; }
-	}
-	
-	@for $i from 1 to 5 
-	{
-		&:nth-child(#{$i + 1})
-		{	
-			animation: flip-#{$i} var(--duration) ease-in-out infinite alternate;
-			&:after{ animation: squidge-#{$i} var(--duration) ease-in-out infinite alternate; }
-		}
-	}
-	
-	&:nth-child(2):after{ background-color: #1C9FFF; }
-	&:nth-child(3):after{ background-color: #1FB1FD; }	
-	&:nth-child(4):after{ background-color: #22C7FB; }
-	&:nth-child(5):after{ background-color: #23D3FB; }
-}
-
-@keyframes slide
-{
-	0% { background-color: #1795FF; transform: translatex(0vw); }
-	100% { background-color: #23D3FB; transform: translatex(calc(var(--container-size) - (var(--box-size) * 1.25))); }
-}
-
-@keyframes color-change
-{
-	0% { background-color: #1795FF; }
-	100% { background-color: #23D3FB; }
-}
-
-@for $i from 1 to 5 
-{	
-    @keyframes flip-#{$i} {
-      0%, #{$i * 15}% { transform: rotate(0); }  
-      #{$i * 15 + 20}%, 100% { transform: rotate(-180deg); }
+    let viewBox: string;
+    $: {
+        if (type === 'triangle') {
+            viewBox = '0 0 86 80';
+        } else {
+            viewBox = '0 0 80 80';
+        }
     }
-	
-	@keyframes squidge-#{$i}
-	{
-		#{$i * 15 - 10}% { transform-origin: center bottom; transform: scalex(1) scaley(1);}
-		#{$i * 15}% { transform-origin: center bottom; transform: scalex(1.3) scaley(0.7);}
-		#{$i * 15 + 10}%, #{$i * 15 + 5}% { transform-origin: center bottom; transform: scalex(0.8) scaley(1.4);}
-		#{$i * 15 + 40}%, 100% { transform-origin: center top; transform: scalex(1) scaley(1);}
-		#{$i * 15 + 25}% { transform-origin: center top; transform: scalex(1.3) scaley(0.7);}
-	}
-}
-</style>
+</script>
 
-<div class="container">
-	{#each Array(5) as _, i}
-		<div class="box"></div>
-	{/each}
+<div class="loader-overlay"> 
+    <div class="loader" class:triangle={type === 'triangle'}> 
+        <svg {viewBox}>
+            {#if type === 'circle'}
+                <circle id="test" cx="40" cy="40" r="32"></circle>
+            {:else if type === 'triangle'}
+                <polygon points="43 8 79 72 7 72"></polygon>
+            {:else if type === 'rect'}
+                <rect x="8" y="8" width="64" height="64"></rect>
+            {/if}
+        </svg>
+    </div>
 </div>
+
+<style lang="scss">
+    .loader-overlay {
+        position: fixed; /* Position fixed to cover the entire viewport */
+        top: 0;
+        left: 0;
+        width: 100vw; /* Full viewport width */
+        height: 100vh; /* Full viewport height */
+        display: flex; /* Use flexbox to center the content */
+        align-items: center; /* Center vertically */
+        justify-content: center; /* Center horizontally */
+        background-color: rgba(0, 0, 0, 0.5); /* Optional: semi-transparent background to dim page content */
+        z-index: 100000; /* High z-index to ensure it's on top of other content */
+    }
+
+    .loader { /* Original .loader styles, now apply to the centered animation box */
+        --path: #2F3545;
+        --dot: #5628EE;
+        --duration: 3s;
+        width: 44px;
+        height: 44px;
+        position: relative; /* Remains relative for positioning the ::before pseudo-element (the dot) */
+        /* The original z-index: 100000; is now handled by .loader-overlay */
+
+        &:before {
+            content: '';
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            position: absolute;
+            display: block;
+            background: var(--dot);
+            top: 37px;
+            left: 19px;
+            transform: translate(-18px, -18px);
+            animation: dotRect var(--duration) cubic-bezier(0.785, 0.135, 0.15, 0.86) infinite;
+        }
+
+        svg {
+            display: block;
+            width: 100%;
+            height: 100%;
+            rect,
+            polygon,
+            circle {
+                fill: none;
+                stroke: var(--path);
+                stroke-width: 10px;
+                stroke-linejoin: round;
+                stroke-linecap: round;
+            }
+            polygon {
+                stroke-dasharray: 145 (221 - 145) 145 (221 - 145);
+                stroke-dashoffset: 0;
+                animation: pathTriangle var(--duration) cubic-bezier(0.785, 0.135, 0.15, 0.86) infinite;
+            }
+            rect {
+                stroke-dasharray: (256 / 4 * 3) (256 / 4) (256 / 4 * 3) (256 / 4);
+                stroke-dashoffset: 0;
+                animation: pathRect 3s cubic-bezier(0.785, 0.135, 0.15, 0.86) infinite;
+            }
+            circle {
+                stroke-dasharray: (200 / 4 * 3) (200 / 4) (200 / 4 * 3) (200 / 4);
+                stroke-dashoffset: 75;
+                animation: pathCircle var(--duration) cubic-bezier(0.785, 0.135, 0.15, 0.86) infinite;
+            }
+        }
+
+        &.triangle {
+            width: 48px;
+            &:before {
+                left: 21px;
+                transform: translate(-10px, -18px);
+                animation: dotTriangle var(--duration) cubic-bezier(0.785, 0.135, 0.15, 0.86) infinite;
+            }
+        }
+    }
+
+    /* Keyframes remain the same as they operate on the .loader element's dimensions and ::before pseudo-element */
+    @keyframes pathTriangle {
+        33% {
+            stroke-dashoffset: 74;
+        }
+        66% {
+            stroke-dashoffset: 147;
+        }
+        100% {
+            stroke-dashoffset: 221;
+        }
+    }
+
+    @keyframes dotTriangle {
+        33% {
+            transform: translate(0, 0);
+        }
+        66% {
+            transform: translate(10px, -18px);
+        }
+        100% {
+            transform: translate(-10px, -18px);
+        }
+    }
+
+    @keyframes pathRect {
+        25% {
+            stroke-dashoffset: 64;
+        }
+        50% {
+            stroke-dashoffset: 128;
+        }
+        75% {
+            stroke-dashoffset: 192;
+        }
+        100% {
+            stroke-dashoffset: 256;
+        }
+    }
+
+    @keyframes dotRect {
+        25% {
+            transform: translate(0, 0);
+        }
+        50% {
+            transform: translate(18px, -18px);
+        }
+        75% {
+            transform: translate(0, -36px);
+        }
+        100% {
+            transform: translate(-18px, -18px);
+        }
+    }
+
+    @keyframes pathCircle {
+        25% {
+            stroke-dashoffset: 125;
+        }
+        50% {
+            stroke-dashoffset: 175;
+        }
+        75% {
+            stroke-dashoffset: 225;
+        }
+        100% {
+            stroke-dashoffset: 275;
+        }
+    }
+</style>
