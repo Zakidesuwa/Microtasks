@@ -116,7 +116,7 @@ export const GET: RequestHandler = async ({ url }) => {
       }
 
       // 5. Send Push Notification using Firebase Admin SDK
-      const appBaseUrl = APP_URL || 'http://localhost:5173';
+      const appBaseUrl = APP_URL || 'https://microtasks-zoys.vercel.app/';
       const taskPageUrl = `${appBaseUrl}/tasks`; 
 
       const messagePayload = {
