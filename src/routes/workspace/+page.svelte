@@ -585,10 +585,6 @@
 			</section>
 		</div>
 	</main>
-
-	<footer class="app-footer">
-		Microtask © {new Date().getFullYear()}
-	</footer>
 </div>
 
 <!-- Modals -->

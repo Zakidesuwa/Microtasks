@@ -10,50 +10,41 @@
   let progress = 0;
   let showLoader = false;
   let navigationStartTime = 0;
+  let isCompleting = false; // Helper state for the final snap
 
-  // --- Configuration for "Real" Progress Feel ---
-  // Time (ms) over which we expect the progress bar to reach MAX_VISUAL_PROGRESS
-  // if the page load is this long or longer.
-  const TARGET_LOAD_DURATION_MS = 2000; // e.g., 2 seconds for a "typical" slow load
-  // The max percentage the bar will reach based on time alone.
-  // The final jump to 100% happens when $navigating becomes false.
+  const TARGET_LOAD_DURATION_MS = 2000;
   const MAX_VISUAL_PROGRESS_BEFORE_COMPLETION = 95;
-  // How frequently to update the progress bar (ms)
   const PROGRESS_UPDATE_INTERVAL_MS = 50;
-  // --- End Configuration ---
+  // Duration (ms) for the progress bar to "snap" to 100%
+  const SNAP_DURATION_MS = 50; // Very fast: 0.05s
+  // Duration (ms) to keep the 100% state visible before starting overlay fade-out
+  const VISIBLE_100_DURATION_MS = 200; // e.g., 0.2s
 
   const loadingMessages = [
-    "Accessing neural network...",
-    "Decrypting data stream...",
-    "Engaging warp core...",
-    "Plotting course through the mainframe...",
-    "Assembling reality fragments...",
-    "Loading environmental shaders...",
-    "Booting cybernetic interface...",
-    "Compiling awesomeness..."
+    "Accessing neural network...", "Decrypting data stream...", "Engaging warp core...",
+    "Plotting course through the mainframe...", "Assembling reality fragments...",
+    "Loading environmental shaders...", "Booting cybernetic interface...", "Compiling awesomeness..."
   ];
   let currentMessageIndex = 0;
 
   $: if ($navigating && !showLoader) {
     showLoader = true;
+    isCompleting = false; // Reset completing state for new navigation
     progress = 0;
     navigationStartTime = Date.now();
     currentMessageIndex = Math.floor(Math.random() * loadingMessages.length);
 
     if (progressInterval) clearInterval(progressInterval);
     progressInterval = setInterval(() => {
-      if (!$navigating) { // Should be caught by the other block, but good for safety
-        clearInterval(progressInterval);
+      if (!$navigating || isCompleting) { // Also stop if we've started completing
+        if (progressInterval) clearInterval(progressInterval);
+        progressInterval = undefined;
         return;
       }
       const elapsedTime = Date.now() - navigationStartTime;
-      // Calculate progress based on time, but cap it
       let timeBasedProgress = (elapsedTime / TARGET_LOAD_DURATION_MS) * MAX_VISUAL_PROGRESS_BEFORE_COMPLETION;
       timeBasedProgress = Math.min(timeBasedProgress, MAX_VISUAL_PROGRESS_BEFORE_COMPLETION);
-
-      // Ensure progress only increases and doesn't exceed the cap
       progress = Math.max(progress, timeBasedProgress);
-
     }, PROGRESS_UPDATE_INTERVAL_MS);
 
     if (messageInterval) clearInterval(messageInterval);
@@ -61,18 +52,31 @@
       currentMessageIndex = (currentMessageIndex + 1) % loadingMessages.length;
     }, 2500);
 
-  } else if (!$navigating && showLoader) {
-    // Navigation has finished!
-    if (progressInterval) clearInterval(progressInterval);
-    progress = 100; // Instantly jump to 100%
+  } else if (!$navigating && showLoader && !isCompleting) {
+    // Navigation has finished, and we haven't started the completion sequence yet
+    isCompleting = true; // Mark that we are now in the completion phase
 
-    // Allow a brief moment for the 100% to show before fading out
+    if (progressInterval) clearInterval(progressInterval);
+    progressInterval = undefined;
+
+    progress = 100; // Trigger the snap to 100%
+
+    // This timeout is to ensure the 100% (with its SNAP_DURATION_MS animation) is visible
+    // before the entire loader starts to fade.
     setTimeout(() => {
-      showLoader = false; // This will trigger the fade-out transition
+      if (!$navigating) { // Double check, page should still be considered loaded
+          showLoader = false; // Start fading out the entire loader
+      }
+
       if (messageInterval) clearInterval(messageInterval);
-      // Reset progress for the next navigation after the loader is hidden
-      setTimeout(() => progress = 0, 500); // Match fade duration
-    }, 150); // Short delay to show 100%
+      messageInterval = undefined;
+
+      // Reset progress after the main loader's fade-out (400ms)
+      setTimeout(() => {
+        progress = 0;
+        // isCompleting will be reset by the next navigation start
+      }, 400); // Matches overlay fade duration
+    }, VISIBLE_100_DURATION_MS);
   }
 
   onDestroy(() => {
@@ -104,7 +108,7 @@
         <div class="progress-bar-track">
           <div
             class="progress-bar-fill"
-            style="width: {progress}%; transition-duration: {progress === 100 ? '0.1s' : (PROGRESS_UPDATE_INTERVAL_MS / 1000) + 's'};"
+            style="width: {progress}%; transition-duration: {isCompleting ? (SNAP_DURATION_MS / 1000) + 's' : (PROGRESS_UPDATE_INTERVAL_MS / 1000) + 's'};"
           ></div>
         </div>
         <span class="progress-percentage">{Math.floor(progress)}%</span>
@@ -169,9 +173,8 @@
     width: 0%;
     background: linear-gradient(90deg, var(--loader-secondary-color), var(--loader-primary-color));
     border-radius: 4px;
-    /* Dynamic transition duration for smoothness */
     transition-property: width;
-    transition-timing-function: linear; /* Or ease-out for a slightly different feel */
+    transition-timing-function: linear;
     box-shadow: 0 0 8px var(--loader-primary-color);
   }
   .progress-percentage { font-size: 0.9em; min-width: 35px; text-align: right; }
