@@ -1,116 +1,285 @@
-<!-- src/lib/components/Loader.svelte -->
+<!-- Loader.svelte -->
 <script lang="ts">
-    export let type: 'circle' | 'triangle' | 'rect' = 'rect';
+  // ... (script tag remains the same as the previous correct version)
+  /**
+   * If true, the indicator will take up the full screen with a semi-transparent overlay.
+   * @default true
+   */
+  export let fullScreen: boolean = true;
 
-    let viewBox: string;
-    $: {
-        if (type === 'triangle') {
-            viewBox = '0 0 86 80';
-        } else {
-            viewBox = '0 0 80 80';
-        }
-    }
+  /**
+   * The message to display below the indicator.
+   * @default "Microtasks is getting ready..."
+   */
+  export let message: string = "Loading, please wait...";
+
+  /**
+   * Animation duration.
+   * @default 1.5
+   */
+  export let duration: number = 1.5; // seconds
+
+  /**
+   * Overall width of the animation container.
+   * @default "200px"
+   */
+  export let containerSize: string = "200px";
+
+  /**
+   * Size of each box (width and height).
+   * @default "27px"
+   */
+  export let boxSize: string = "27px";
+
+  /**
+   * Border radius for the boxes.
+   * @default "15%"
+   */
+  export let boxBorderRadius: string = "15%";
+
+  /**
+   * Background color for the full-screen overlay.
+   * @default "rgba(30, 41, 59, 0.7)"
+   */
+  export let overlayBackgroundColor: string = "rgba(30, 41, 59, 0.7)";
+
+  /**
+   * Text color for the message.
+   * @default "#e2e8f0"
+   */
+  export let messageTextColor: string = "#e2e8f0";
+
+  export let slideBoxAfterStartColor: string = "#1795FF";
+  export let slideBoxAfterEndColor: string = "#23D3FB";
+  export let box2AfterColor: string = "#1C9FFF";
+  export let box3AfterColor: string = "#1FB1FD";
+  export let box4AfterColor: string = "#22C7FB";
+  export let box5AfterColor: string = "#23D3FB";
+  export let boxShadowBaseColor: string = "#1C9FFF";
 </script>
 
-<div class="loader-overlay">
-    <div class="loader" class:triangle={type === 'triangle'}>
-        <svg {viewBox}>
-            {#if type === 'circle'}
-                <circle id="test" cx="40" cy="40" r="32"></circle>
-            {:else if type === 'triangle'}
-                <polygon points="43 8 79 72 7 72"></polygon>
-            {:else if type === 'rect'}
-                <rect x="8" y="8" width="64" height="64"></rect>
-            {/if}
-        </svg>
+{#if fullScreen}
+  <div
+    class="loader-overlay"
+    style:--overlay-bg-color={overlayBackgroundColor}
+    role="status"
+    aria-live="polite"
+  >
+    <div
+      class="animation-wrapper"
+      style:--duration="{duration}s"
+      style:--container-size={containerSize}
+      style:--box-size={boxSize}
+      style:--box-border-radius={boxBorderRadius}
+      style:--slide-box-after-start-color={slideBoxAfterStartColor}
+      style:--slide-box-after-end-color={slideBoxAfterEndColor}
+      style:--box2-after-color={box2AfterColor}
+      style:--box3-after-color={box3AfterColor}
+      style:--box4-after-color={box4AfterColor}
+      style:--box5-after-color={box5AfterColor}
+      style:--box-shadow-base-color={boxShadowBaseColor}
+    >
+      <div class="container">
+        <div class="box"></div> <!-- Box 1 -->
+        <div class="box"></div> <!-- Box 2 -->
+        <div class="box"></div> <!-- Box 3 -->
+        <div class="box"></div> <!-- Box 4 -->
+        <div class="box"></div> <!-- Box 5 -->
+      </div>
     </div>
-</div>
+    {#if message}
+      <p class="loader-message" style:color={messageTextColor}>{message}</p>
+    {/if}
+  </div>
+{:else}
+  <div
+    class="animation-wrapper"
+    style:--duration="{duration}s"
+    style:--container-size={containerSize}
+    style:--box-size={boxSize}
+    style:--box-border-radius={boxBorderRadius}
+    style:--slide-box-after-start-color={slideBoxAfterStartColor}
+    style:--slide-box-after-end-color={slideBoxAfterEndColor}
+    style:--box2-after-color={box2AfterColor}
+    style:--box3-after-color={box3AfterColor}
+    style:--box4-after-color={box4AfterColor}
+    style:--box5-after-color={box5AfterColor}
+    style:--box-shadow-base-color={boxShadowBaseColor}
+  >
+    <div class="container">
+      <div class="box"></div>
+      <div class="box"></div>
+      <div class="box"></div>
+      <div class="box"></div>
+      <div class="box"></div>
+    </div>
+    {#if message}
+      <p class="loader-message-inline" style:color={messageTextColor}>{message}</p>
+    {/if}
+  </div>
+{/if}
 
 <style lang="scss">
-    @use "sass:math"; // Import sass:math
+  .loader-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    background-color: var(--overlay-bg-color);
+    z-index: 100000;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
 
-    .loader-overlay {
-        position: fixed;
-        top: 0;
-        left: 0;
-        width: 100vw;
-        height: 100vh;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        background-color: rgba(0, 0, 0, 0.5);
-        z-index: 100000;
+  .animation-wrapper {
+    // CSS variables are set here
+  }
+
+  .loader-message {
+    margin-top: 20px;
+    font-size: 1rem;
+    font-weight: 500;
+  }
+  .loader-message-inline {
+    font-size: 0.9rem;
+    margin-top: 10px;
+  }
+
+  .container {
+    width: var(--container-size);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    position: relative;
+  }
+
+  .box {
+    width: var(--box-size);
+    height: var(--box-size);
+    position: relative;
+    display: block;
+    transform-origin: -50% center;
+    border-radius: var(--box-border-radius);
+
+    &:after {
+      content: '';
+      width: 100%;
+      height: 100%;
+      position: absolute;
+      top: 0;
+      right: 0;
+      border-radius: var(--box-border-radius);
+      box-shadow: 0px 0px 10px 0px rgba(var(--box-shadow-base-color), 0.4);
     }
 
-    .loader {
-        --path: #2F3545;
-        --dot: #5628EE;
-        --duration: 3s;
-        width: 44px;
-        height: 44px;
-        position: relative;
-
-        &:before {
-            content: '';
-            width: 6px;
-            height: 6px;
-            border-radius: 50%;
-            position: absolute;
-            display: block;
-            background: var(--dot);
-            top: 37px;
-            left: 19px;
-            transform: translate(-18px, -18px);
-            animation: dotRect var(--duration) cubic-bezier(0.785, 0.135, 0.15, 0.86) infinite;
-        }
-
-        svg {
-            display: block;
-            width: 100%;
-            height: 100%;
-            rect,
-            polygon,
-            circle {
-                fill: none;
-                stroke: var(--path);
-                stroke-width: 10px;
-                stroke-linejoin: round;
-                stroke-linecap: round;
-            }
-            polygon {
-                // Example for polygon, apply similarly for others if needed
-                stroke-dasharray: 145 (221 - 145) 145 (221 - 145);
-                stroke-dashoffset: 0;
-                animation: pathTriangle var(--duration) cubic-bezier(0.785, 0.135, 0.15, 0.86) infinite;
-            }
-            rect {
-                // Use math.div()
-                stroke-dasharray: (math.div(256, 4) * 3) math.div(256, 4) (math.div(256, 4) * 3) math.div(256, 4);
-                stroke-dashoffset: 0;
-                animation: pathRect 3s cubic-bezier(0.785, 0.135, 0.15, 0.86) infinite;
-            }
-            circle {
-                // Use math.div()
-                stroke-dasharray: (math.div(200, 4) * 3) math.div(200, 4) (math.div(200, 4) * 3) math.div(200, 4);
-                stroke-dashoffset: 75;
-                animation: pathCircle var(--duration) cubic-bezier(0.785, 0.135, 0.15, 0.86) infinite;
-            }
-        }
-
-        &.triangle {
-            width: 48px;
-            &:before {
-                left: 21px;
-                transform: translate(-10px, -18px);
-                animation: dotTriangle var(--duration) cubic-bezier(0.785, 0.135, 0.15, 0.86) infinite;
-            }
-        }
+    &:nth-child(1) {
+      animation: slide var(--duration) ease-in-out infinite alternate;
+      &:after {
+        animation: color-change var(--duration) ease-in-out infinite alternate;
+      }
     }
 
-    // Keyframes remain the same
-    @keyframes pathTriangle { /* ... */ }
-    @keyframes dotTriangle { /* ... */ }
-    @keyframes pathRect { /* ... */ }
-    @keyframes dotRect { /* ... */ }
-    @keyframes pathCircle { /* ... */ }
+    &:nth-child(2) {
+      animation: flip-1 var(--duration) ease-in-out infinite alternate;
+      &:after {
+        background-color: var(--box2-after-color);
+        animation: squidge-1 var(--duration) ease-in-out infinite alternate;
+      }
+    }
+    &:nth-child(3) {
+      animation: flip-2 var(--duration) ease-in-out infinite alternate;
+      &:after {
+        background-color: var(--box3-after-color);
+        animation: squidge-2 var(--duration) ease-in-out infinite alternate;
+      }
+    }
+    &:nth-child(4) {
+      animation: flip-3 var(--duration) ease-in-out infinite alternate;
+      &:after {
+        background-color: var(--box4-after-color);
+        animation: squidge-3 var(--duration) ease-in-out infinite alternate;
+      }
+    }
+    &:nth-child(5) {
+      animation: flip-4 var(--duration) ease-in-out infinite alternate;
+      &:after {
+        background-color: var(--box5-after-color);
+        animation: squidge-4 var(--duration) ease-in-out infinite alternate;
+      }
+    }
+  }
+
+  @keyframes slide {
+    0% {
+      background-color: var(--slide-box-after-start-color);
+      transform: translatex(0vw);
+    }
+    100% {
+      background-color: var(--slide-box-after-end-color);
+      transform: translatex(calc(var(--container-size) - (var(--box-size) * 1.25)));
+    }
+  }
+
+  @keyframes color-change {
+    0% { background-color: var(--slide-box-after-start-color); }
+    100% { background-color: var(--slide-box-after-end-color); }
+  }
+
+  // --- Staggered Keyframes with static percentages ---
+
+  // For .box:nth-child(2)
+  @keyframes flip-1 {
+    0%, 15% { transform: rotate(0); }
+    35%, 100% { transform: rotate(-180deg); }
+  }
+  @keyframes squidge-1 {
+    5% { transform-origin: center bottom; transform: scalex(1) scaley(1); }
+    15% { transform-origin: center bottom; transform: scalex(1.3) scaley(0.7); }
+    20%, 25% { transform-origin: center bottom; transform: scalex(0.8) scaley(1.4); }
+    40% { transform-origin: center top; transform: scalex(1.3) scaley(0.7); }
+    55%, 100% { transform-origin: center top; transform: scalex(1) scaley(1); }
+  }
+
+  // For .box:nth-child(3)
+  @keyframes flip-2 {
+    0%, 30% { transform: rotate(0); }
+    50%, 100% { transform: rotate(-180deg); }
+  }
+  @keyframes squidge-2 {
+    20% { transform-origin: center bottom; transform: scalex(1) scaley(1); }
+    30% { transform-origin: center bottom; transform: scalex(1.3) scaley(0.7); }
+    35%, 40% { transform-origin: center bottom; transform: scalex(0.8) scaley(1.4); }
+    55% { transform-origin: center top; transform: scalex(1.3) scaley(0.7); }
+    70%, 100% { transform-origin: center top; transform: scalex(1) scaley(1); }
+  }
+
+  // For .box:nth-child(4)
+  @keyframes flip-3 {
+    0%, 45% { transform: rotate(0); }
+    65%, 100% { transform: rotate(-180deg); }
+  }
+  @keyframes squidge-3 {
+    35% { transform-origin: center bottom; transform: scalex(1) scaley(1); }
+    45% { transform-origin: center bottom; transform: scalex(1.3) scaley(0.7); }
+    50%, 55% { transform-origin: center bottom; transform: scalex(0.8) scaley(1.4); }
+    70% { transform-origin: center top; transform: scalex(1.3) scaley(0.7); }
+    85%, 100% { transform-origin: center top; transform: scalex(1) scaley(1); }
+  }
+
+  // For .box:nth-child(5)
+  @keyframes flip-4 {
+    0%, 60% { transform: rotate(0); }
+    80%, 100% { transform: rotate(-180deg); }
+  }
+  @keyframes squidge-4 {
+    50% { transform-origin: center bottom; transform: scalex(1) scaley(1); }
+    60% { transform-origin: center bottom; transform: scalex(1.3) scaley(0.7); }
+    65%, 70% { transform-origin: center bottom; transform: scalex(0.8) scaley(1.4); }
+    85% { transform-origin: center top; transform: scalex(1.3) scaley(0.7); }
+    100% { transform-origin: center top; transform: scalex(1) scaley(1); } // Only 100% for the last step
+  }
 </style>
