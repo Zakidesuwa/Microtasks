@@ -4,9 +4,9 @@
 	import { browser } from '$app/environment';
     import { fly } from 'svelte/transition';
     import { quintOut } from 'svelte/easing';
-    import { enhance } from '$app/forms';
+    import { goto } from '$app/navigation';
 
-    export let data: import('./$types').PageData; // PageData will use the WorkspaceForFrontend interface
+    export let data: import('./$types').PageData;
 
     // --- KANBAN INTERFACES ---
     interface PlaceholderTask {
@@ -16,23 +16,21 @@
         priority?: 'high' | 'medium' | 'low' | 'standard' | string;
         dueDateISO?: string | null;
         dueTime?: string | null;
-        boardId: string;
     }
-    interface PlaceholderColumn { // Represents a Workspace/Board
-        id: string; // This is the boardId (from WorkspaceForFrontend.id on server)
-        title: string; // This is the WorkspaceForFrontend.name
+    interface PlaceholderColumn {
+        id: 'todo' | 'inProgress' | 'done';
+        title: string;
         tasks: PlaceholderTask[];
-        // createdAtISO?: string | null; // If you need to use this on the client from data.workspaces
     }
     // --- END KANBAN INTERFACES ---
 
     // --- LOCALSTORAGE STATE ---
     interface KanbanLayoutStorage {
-        columnOrder: string[]; // Array of boardIds
-        taskOrders: Record<string, string[]>; // Key is boardId, value is array of taskIds
+        columnOrder: PlaceholderColumn['id'][];
+        taskOrders: Record<PlaceholderColumn['id'], string[]>;
     }
     let savedLayout: KanbanLayoutStorage | null = null;
-    const KANBAN_STORAGE_KEY = 'kanbanBoardLayout_v2';
+    const KANBAN_STORAGE_KEY = 'kanbanBoardLayout';
 
     // --- HEADER/SIDEBAR UI STATE ---
 	let isSidebarOpen = false;
@@ -41,7 +39,7 @@
     let usernameForDisplay: string;
     // --- END Header/Sidebar UI State ---
 
-    // --- KANBAN DRAG & DROP STATE ---
+    // --- KANBAN DRAG & DROP STATE (Column & Card) ---
     let draggedColumnItem: PlaceholderColumn | null = null;
     let activeDraggedColumnElement: HTMLElement | null = null;
     let columnDragOverIndex: number | null = null;
@@ -52,9 +50,9 @@
     let currentSkewX = 0, targetSkewX = 0, skewXVelocity = 0;
     let columnAnimationFrameId: number | null = null;
 
-    let draggedCardItem: { task: PlaceholderTask; fromColumnId: string } | null = null;
-    let currentCardDragOverInfo: { columnId: string; overTaskId?: string; position?: 'before' | 'after' } | null = null;
-    let activeDraggedCardElement: HTMLElement | null = null;
+    let draggedCardItem: { task: PlaceholderTask; fromColumnId: PlaceholderColumn['id'] } | null = null;
+    let currentCardDragOverInfo: { columnId: PlaceholderColumn['id']; overTaskId?: string; position?: 'before' | 'after' } | null = null;
+    let activeDraggedCardElement: HTMLElement | null = null; // Card element
     let cardDragOffsetX = 0, cardDragOffsetY = 0;
     let currentCardX = 0, currentCardY = 0, targetCardX = 0, targetCardY = 0;
     let cardVelocityX = 0, cardVelocityY = 0;
@@ -69,6 +67,7 @@
     let DUMMY_DRAG_IMAGE: HTMLImageElement;
     // --- END KANBAN DRAG & DROP STATE ---
 
+    // --- REACTIVE DERIVATION OF KANBAN BOARD COLUMNS ---
     let boardColumns: PlaceholderColumn[] = [];
 
     function mapRawTaskToPlaceholder(rawTask: typeof data.tasks[0]): PlaceholderTask {
@@ -78,90 +77,73 @@
             description: rawTask.description || undefined,
             priority: mapPriorityToKanban(rawTask.priority),
             dueDateISO: rawTask.dueDateISO,
-            dueTime: rawTask.dueTime,
-            boardId: rawTask.boardId
+            dueTime: rawTask.dueTime
         };
     }
 
     $: {
         usernameForDisplay = data.user?.name || 'User';
+        const columnTitles: Record<PlaceholderColumn['id'], string> = { todo: 'To Do', inProgress: 'In Progress', done: 'Completed' };
+        const defaultColumnOrder: PlaceholderColumn['id'][] = ['todo', 'inProgress', 'done'];
 
-        if (!data.workspaces || data.workspaces.length === 0) {
-            boardColumns = [];
+        if (!data.tasks || !Array.isArray(data.tasks)) {
+            // Initialize with empty default columns if no data
+            boardColumns = defaultColumnOrder.map(id => ({
+                id,
+                title: columnTitles[id],
+                tasks: []
+            }));
         } else {
-            let orderedWorkspaceIds: string[];
-            const allWorkspaceIdsFromData = data.workspaces.map(ws => ws.id);
+            const allRawTasks = data.tasks;
+            const tasksById = new Map(allRawTasks.map(t => [t.id, t]));
+            
+            let finalColumnOrder: PlaceholderColumn['id'][];
 
-            if (savedLayout && savedLayout.columnOrder && savedLayout.columnOrder.length > 0) {
-                orderedWorkspaceIds = savedLayout.columnOrder.filter(id => allWorkspaceIdsFromData.includes(id));
-                allWorkspaceIdsFromData.forEach(id => {
-                    if (!orderedWorkspaceIds.includes(id)) {
-                        orderedWorkspaceIds.push(id);
+            if (savedLayout && savedLayout.columnOrder) {
+                finalColumnOrder = [...savedLayout.columnOrder];
+                defaultColumnOrder.forEach(defaultColId => {
+                    if (!finalColumnOrder.includes(defaultColId)) {
+                        finalColumnOrder.push(defaultColId);
                     }
                 });
+                finalColumnOrder = finalColumnOrder.filter(id => defaultColumnOrder.includes(id));
             } else {
-                orderedWorkspaceIds = [...allWorkspaceIdsFromData];
+                finalColumnOrder = [...defaultColumnOrder];
             }
 
-            const workspaceMap = new Map(data.workspaces.map(ws => [ws.id, ws]));
-            const tempBoardColumns = orderedWorkspaceIds.map(boardId => {
-                const workspace = workspaceMap.get(boardId);
-                if (!workspace) {
-                    console.warn(`CRITICAL (Svelte): Workspace with ID ${boardId} was in orderedWorkspaceIds but NOT FOUND in workspaceMap. This column will be skipped.`);
-                    return null;
-                }
-                return {
-                    id: boardId,
-                    title: workspace.name, // This uses the name from data.workspaces
-                    tasks: [] as PlaceholderTask[],
-                };
-            }).filter(Boolean) as PlaceholderColumn[];
-
-            const columnsMapById = new Map(tempBoardColumns.map(col => [col.id, col]));
-            const serverDefaultBoardId = data.workspaces.length > 0 ? data.workspaces[0].id : null;
-
-            (data.tasks || []).forEach(rawTask => {
-                const task = mapRawTaskToPlaceholder(rawTask);
-                let targetColumn = columnsMapById.get(task.boardId);
-
-                if (!targetColumn) {
-                    if (serverDefaultBoardId) {
-                        targetColumn = columnsMapById.get(serverDefaultBoardId);
-                    }
-                    if (targetColumn) {
-                        task.boardId = targetColumn.id;
-                    } else if (tempBoardColumns.length > 0) {
-                        targetColumn = tempBoardColumns[0];
-                        task.boardId = targetColumn.id;
-                    }
-                }
-                
-                if (targetColumn) {
-                    if (!targetColumn.tasks.some(t => t.id === task.id)) {
-                        targetColumn.tasks.push(task);
-                    }
-                } else {
-                     console.error(`Task ${task.id} could not be placed. No target column found and no fallbacks available.`);
-                }
-            });
+            const tempBoardColumns = finalColumnOrder.map(id => ({
+                id,
+                title: columnTitles[id],
+                tasks: [] as PlaceholderTask[]
+            }));
+            const columnsMap = new Map(tempBoardColumns.map(col => [col.id, col]));
+            const processedTaskIds = new Set<string>();
 
             if (savedLayout && savedLayout.taskOrders) {
-                const taskOrdersFromStorage = savedLayout.taskOrders;
-                tempBoardColumns.forEach(column => {
-                    const orderedTaskIdsForColumn = taskOrdersFromStorage[column.id];
-                    if (orderedTaskIdsForColumn && orderedTaskIdsForColumn.length > 0) {
-                        const taskMapInColumn = new Map(column.tasks.map(t => [t.id, t]));
-                        const sortedTasks: PlaceholderTask[] = [];
-                        orderedTaskIdsForColumn.forEach(taskId => {
-                            if (taskMapInColumn.has(taskId)) {
-                                sortedTasks.push(taskMapInColumn.get(taskId)!);
-                                taskMapInColumn.delete(taskId);
-                            }
-                        });
-                        sortedTasks.push(...taskMapInColumn.values());
-                        column.tasks = sortedTasks;
+                for (const columnId of finalColumnOrder) { // Iterate in the final determined order
+                    const column = columnsMap.get(columnId);
+                    if (!column) continue;
+
+                    const tasksForThisColumnInStorage = savedLayout.taskOrders[columnId] || [];
+                    for (const taskId of tasksForThisColumnInStorage) {
+                        if (tasksById.has(taskId) && !processedTaskIds.has(taskId)) {
+                            const rawTask = tasksById.get(taskId)!;
+                            column.tasks.push(mapRawTaskToPlaceholder(rawTask));
+                            processedTaskIds.add(taskId);
+                        }
                     }
-                });
+                }
+            }
+
+            for (const rawTask of allRawTasks) {
+                if (!processedTaskIds.has(rawTask.id)) {
+                    const boardTask = mapRawTaskToPlaceholder(rawTask);
+                    let targetColumnId: PlaceholderColumn['id'] = rawTask.isCompleted ? 'done' : 'todo';
+                    
+                    const targetColumn = columnsMap.get(targetColumnId) || columnsMap.get('todo')!;
+                    targetColumn.tasks.push(boardTask);
+                    // No need to add to processedTaskIds here as this loop is for unprocessed tasks
+                }
             }
             boardColumns = tempBoardColumns;
         }
@@ -177,35 +159,42 @@
         }
         return 'standard';
     }
+    // --- END REACTIVE DERIVATION ---
 
+    // --- LOCALSTORAGE FUNCTIONS ---
     function loadBoardStateFromLocalStorage() {
         if (!browser) return;
         const storedLayout = localStorage.getItem(KANBAN_STORAGE_KEY);
         if (storedLayout) {
             try {
                 savedLayout = JSON.parse(storedLayout);
+                // console.log("Kanban state loaded from localStorage:", savedLayout);
             } catch (e) {
                 console.error("Failed to parse saved kanban layout:", e);
-                localStorage.removeItem(KANBAN_STORAGE_KEY);
+                localStorage.removeItem(KANBAN_STORAGE_KEY); // Clear corrupted data
                 savedLayout = null;
             }
         } else {
-            savedLayout = null;
+            savedLayout = null; // Explicitly set to null to trigger reactivity if it wasn't
         }
     }
 
     function saveBoardStateToLocalStorage() {
         if (!browser || !boardColumns || boardColumns.length === 0) return;
+
         const layoutToSave: KanbanLayoutStorage = {
             columnOrder: boardColumns.map(col => col.id),
             taskOrders: boardColumns.reduce((acc, col) => {
                 acc[col.id] = col.tasks.map(task => task.id);
                 return acc;
-            }, {} as Record<string, string[]>)
+            }, {} as Record<PlaceholderColumn['id'], string[]>)
         };
         localStorage.setItem(KANBAN_STORAGE_KEY, JSON.stringify(layoutToSave));
+        // console.log("Kanban state saved to localStorage.");
     }
+    // --- END LOCALSTORAGE FUNCTIONS ---
 
+    // --- HEADER/SIDEBAR FUNCTIONS ---
     function toggleSidebar() { isSidebarOpen = !isSidebarOpen; }
     function closeSidebar() { isSidebarOpen = false; }
     function toggleDarkMode() {
@@ -233,14 +222,24 @@
             }
         });
     }
+    function handleLogout() {
+		if (browser) {
+			console.log("Logout action triggered from Kanban page");
+            localStorage.removeItem(KANBAN_STORAGE_KEY); // Optional: clear board state on logout
+			goto('/login'); 
+		}
+  	}
+    // --- END HEADER/SIDEBAR FUNCTIONS ---
 
     let handleGlobalClickListener: ((event: MouseEvent) => void);
     let handleEscKeyListener: ((event: KeyboardEvent) => void);
 
 	onMount(() => {
-        loadBoardStateFromLocalStorage();
+        loadBoardStateFromLocalStorage(); // Load saved layout first
+
         DUMMY_DRAG_IMAGE = new Image();
         DUMMY_DRAG_IMAGE.src = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+
         const storedDarkMode = localStorage.getItem('theme');
 		if (storedDarkMode === 'dark' || (!storedDarkMode && window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
 			isDarkMode = true;
@@ -249,6 +248,7 @@
             isDarkMode = false;
             if (browser) document.body.classList.remove('dark');
         }
+
         const setupIconListener = (iconId: string, windowId: string) => {
             const iconElement = document.getElementById(iconId);
             if (iconElement) {
@@ -260,21 +260,24 @@
         setupIconListener('bellIcon', 'notifWindow');
         setupIconListener('helpIcon', 'helpWindow');
         setupIconListener('profileIcon', 'profileWindow');
+        
         const darkModeButton = document.getElementById('darkModeToggle');
         if (darkModeButton) darkModeButton.addEventListener('click', toggleDarkMode);
+
         handleGlobalClickListener = (event: MouseEvent) => {
             const target = event.target as Node | null;
             let isClickInsideHeaderDropdownTrigger = false;
-            const headerTriggerIds = ['bellIcon', 'helpIcon', 'profileIcon'];
+            const headerTriggerIds = ['bellIcon', 'helpIcon', 'profileIcon']; 
             headerTriggerIds.forEach(triggerId => { const triggerEl = document.getElementById(triggerId); if (triggerEl && triggerEl.contains(target)) isClickInsideHeaderDropdownTrigger = true; });
             let isClickInsideHeaderDropdownWindow = false;
             dropdownIds.forEach(windowId => { const windowEl = document.getElementById(windowId); if (windowEl && windowEl.contains(target)) isClickInsideHeaderDropdownWindow = true; });
-            if (!isClickInsideHeaderDropdownTrigger && !isClickInsideHeaderDropdownWindow) closeOtherWindows('');
+            if (!isClickInsideHeaderDropdownTrigger && !isClickInsideHeaderDropdownWindow) closeOtherWindows(''); 
             const sidebarEl = document.getElementById('sidebar');
             const hamburgerButton = document.getElementById('hamburgerButton');
             if (isSidebarOpen && sidebarEl && !sidebarEl.contains(target) && hamburgerButton && !hamburgerButton.contains(target)) closeSidebar();
         };
         if (browser) document.addEventListener('click', handleGlobalClickListener);
+        
         handleEscKeyListener = (event: KeyboardEvent) => {
             if (event.key === 'Escape') {
                 if (isSidebarOpen) closeSidebar();
@@ -282,6 +285,7 @@
             }
         };
 		if (browser) document.addEventListener('keydown', handleEscKeyListener);
+
 		return () => {
             if (browser) {
                 if (handleGlobalClickListener) document.removeEventListener('click', handleGlobalClickListener);
@@ -295,26 +299,32 @@
             });
             const darkModeButtonEl = document.getElementById('darkModeToggle');
             if (darkModeButtonEl) darkModeButtonEl.removeEventListener('click', toggleDarkMode);
+
             if (columnAnimationFrameId) cancelAnimationFrame(columnAnimationFrameId);
             if (cardAnimationFrameId) cancelAnimationFrame(cardAnimationFrameId);
 		};
 	});
 
-    function handleCardDragStart(event: DragEvent, task: PlaceholderTask, fromColumnBoardId: string) {
+    // --- KANBAN DRAG/DROP FUNCTIONS (DEFINED ONCE) ---
+    function handleCardDragStart(event: DragEvent, task: PlaceholderTask, fromColumnId: PlaceholderColumn['id']) {
         if (event.dataTransfer && DUMMY_DRAG_IMAGE) {
             event.dataTransfer.setData('text/task-id', task.id);
             event.dataTransfer.effectAllowed = 'move';
             event.dataTransfer.setDragImage(DUMMY_DRAG_IMAGE, 0, 0);
-            draggedCardItem = { task, fromColumnId: fromColumnBoardId };
+            draggedCardItem = { task, fromColumnId };
             activeDraggedCardElement = event.target as HTMLElement;
             const rect = activeDraggedCardElement.getBoundingClientRect();
             cardDragOffsetX = event.clientX - rect.left; cardDragOffsetY = event.clientY - rect.top;
-            currentCardX = rect.left; currentCardY = rect.top; targetCardX = rect.left; targetCardY = rect.top;
+            currentCardX = rect.left; currentCardY = rect.top;
+            targetCardX = rect.left; targetCardY = rect.top;
             cardVelocityX = 0; cardVelocityY = 0;
             activeDraggedCardElement.style.position = 'fixed';
-            activeDraggedCardElement.style.left = `${currentCardX}px`; activeDraggedCardElement.style.top = `${currentCardY}px`;
-            activeDraggedCardElement.style.width = `${rect.width}px`; activeDraggedCardElement.style.height = `${rect.height}px`;
-            activeDraggedCardElement.style.zIndex = '1001'; activeDraggedCardElement.style.margin = '0';
+            activeDraggedCardElement.style.left = `${currentCardX}px`;
+            activeDraggedCardElement.style.top = `${currentCardY}px`;
+            activeDraggedCardElement.style.width = `${rect.width}px`;
+            activeDraggedCardElement.style.height = `${rect.height}px`;
+            activeDraggedCardElement.style.zIndex = '1001';
+            activeDraggedCardElement.style.margin = '0';
             setTimeout(() => { activeDraggedCardElement?.classList.add('dragging-card'); }, 0);
             if (cardAnimationFrameId) cancelAnimationFrame(cardAnimationFrameId);
             cardAnimationFrameId = requestAnimationFrame(updateCardPosition);
@@ -336,7 +346,7 @@
         activeDraggedCardElement.style.transform = `rotate(2deg) scale(1.03)`;
         cardAnimationFrameId = requestAnimationFrame(updateCardPosition);
     }
-    function handleCardDragOverItem(event: DragEvent, targetColumnBoardId: string, overTaskId?: string) {
+    function handleCardDragOverItem(event: DragEvent, targetColumnId: PlaceholderColumn['id'], overTaskId?: string) {
         event.preventDefault(); event.stopPropagation();
         if (!draggedCardItem || draggedColumnItem) return;
         if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
@@ -345,64 +355,54 @@
             const targetCardElement = document.getElementById(`task-${overTaskId}`);
             if (targetCardElement && targetCardElement !== activeDraggedCardElement) { const rect = targetCardElement.getBoundingClientRect(); const midpointY = rect.top + rect.height / 2; position = event.clientY < midpointY ? 'before' : 'after'; }
         }
-        if (currentCardDragOverInfo?.columnId !== targetColumnBoardId || currentCardDragOverInfo?.overTaskId !== overTaskId || currentCardDragOverInfo?.position !== position) {
-            currentCardDragOverInfo = { columnId: targetColumnBoardId, overTaskId: (draggedCardItem && overTaskId === draggedCardItem.task.id) ? undefined : overTaskId, position };
-        }
+        if (currentCardDragOverInfo?.columnId !== targetColumnId || currentCardDragOverInfo?.overTaskId !== overTaskId || currentCardDragOverInfo?.position !== position) { currentCardDragOverInfo = { columnId: targetColumnId, overTaskId: (draggedCardItem && overTaskId === draggedCardItem.task.id) ? undefined : overTaskId, position }; }
     }
     function handleCardDragLeaveItem(event: DragEvent, itemType: 'column' | 'card', itemId: string) {
         event.stopPropagation(); if (!draggedCardItem) return;
         const relatedTarget = event.relatedTarget as Node | null; const currentTarget = event.currentTarget as HTMLElement;
         if (!relatedTarget || !currentTarget.closest('.kanban-board')?.contains(relatedTarget)) { currentCardDragOverInfo = null; return; }
-        if (itemType === 'card' && currentCardDragOverInfo?.overTaskId === itemId) {
-            const columnElement = currentTarget.closest('.kanban-column');
-            if (columnElement && columnElement.contains(relatedTarget) && !(relatedTarget as HTMLElement).closest('.kanban-card')) {
-                const columnBoardId = columnElement.getAttribute('data-column-id');
-                if (columnBoardId) { currentCardDragOverInfo = { columnId: columnBoardId }; }
-            }
-        }
+        if (itemType === 'card' && currentCardDragOverInfo?.overTaskId === itemId) { const columnElement = currentTarget.closest('.kanban-column'); if (columnElement && columnElement.contains(relatedTarget) && !(relatedTarget as HTMLElement).closest('.kanban-card')) { currentCardDragOverInfo = { columnId: currentCardDragOverInfo.columnId }; } }
     }
-    async function handleDropOnCardOrColumn(event: DragEvent, targetColumnBoardId: string, dropTargetTaskId?: string) {
+    function handleDropOnCardOrColumn(event: DragEvent, targetColumnId: PlaceholderColumn['id'], dropTargetTaskId?: string) {
         event.preventDefault(); event.stopPropagation();
         if (draggedColumnItem) return; if (!draggedCardItem) { cleanupCardDragState(); return; }
-        const { task: taskToMove, fromColumnId: originalBoardId } = draggedCardItem;
-        if (dropTargetTaskId === taskToMove.id && targetColumnBoardId === originalBoardId) { return; }
-        const sourceColIndex = boardColumns.findIndex(col => col.id === originalBoardId);
-        if (sourceColIndex === -1) { return; }
+        const { task: taskToMove, fromColumnId } = draggedCardItem;
+        if (dropTargetTaskId === taskToMove.id && targetColumnId === fromColumnId) { cleanupCardDragState(); return; }
+        
+        const sourceColIndex = boardColumns.findIndex(col => col.id === fromColumnId);
+        if (sourceColIndex === -1) { cleanupCardDragState(); return; }
+        
         const taskIndexInSource = boardColumns[sourceColIndex].tasks.findIndex(t => t.id === taskToMove.id);
-        if (taskIndexInSource > -1) { boardColumns[sourceColIndex].tasks.splice(taskIndexInSource, 1); }
-        const destColIndex = boardColumns.findIndex(col => col.id === targetColumnBoardId);
-        if (destColIndex === -1) {
-            if (taskIndexInSource > -1) boardColumns[sourceColIndex].tasks.splice(taskIndexInSource, 0, taskToMove);
-            return;
+        if (taskIndexInSource > -1) {
+            boardColumns[sourceColIndex].tasks.splice(taskIndexInSource, 1);
         }
-        taskToMove.boardId = targetColumnBoardId; // Update boardId on the task object
+
+        const destColIndex = boardColumns.findIndex(col => col.id === targetColumnId);
+        if (destColIndex === -1) { // Should not happen if columns are fixed
+            if (taskIndexInSource > -1) boardColumns[sourceColIndex].tasks.splice(taskIndexInSource, 0, taskToMove); // Put back if dest not found
+            cleanupCardDragState(); 
+            return; 
+        }
+
         let inserted = false;
         if (dropTargetTaskId && currentCardDragOverInfo?.position && (draggedCardItem && dropTargetTaskId !== draggedCardItem.task.id)) {
             const targetIndexInDest = boardColumns[destColIndex].tasks.findIndex(t => t.id === dropTargetTaskId);
             if (targetIndexInDest > -1) {
-                if (currentCardDragOverInfo.position === 'before') { boardColumns[destColIndex].tasks.splice(targetIndexInDest, 0, taskToMove); }
-                else { boardColumns[destColIndex].tasks.splice(targetIndexInDest + 1, 0, taskToMove); }
+                if (currentCardDragOverInfo.position === 'before') {
+                    boardColumns[destColIndex].tasks.splice(targetIndexInDest, 0, taskToMove);
+                } else {
+                    boardColumns[destColIndex].tasks.splice(targetIndexInDest + 1, 0, taskToMove);
+                }
                 inserted = true;
             }
         }
-        if (!inserted) { boardColumns[destColIndex].tasks.push(taskToMove); }
-        if (originalBoardId !== targetColumnBoardId) {
-            const formData = new FormData();
-            formData.append('taskId', taskToMove.id);
-            formData.append('newBoardId', targetColumnBoardId);
-            try {
-                const response = await fetch('?/moveTaskToBoard', { method: 'POST', body: formData });
-                if (!response.ok) {
-                    const result = await response.json().catch(() => ({moveTaskForm: { error: "Failed to parse server error" }}));
-                    console.error('Failed to update task boardId on server:', result.moveTaskForm?.error || 'Unknown server error');
-                } else {
-                    const result = await response.json();
-                    if (!result.moveTaskForm?.success) console.error('Server indicated failure after OK response for moveTaskToBoard:', result.moveTaskForm?.error);
-                }
-            } catch (err) { console.error('Error calling moveTaskToBoard action:', err); }
+        
+        if (!inserted) {
+            boardColumns[destColIndex].tasks.push(taskToMove);
         }
-        boardColumns = [...boardColumns];
-        saveBoardStateToLocalStorage();
+        
+        boardColumns = [...boardColumns]; // Trigger Svelte reactivity
+        saveBoardStateToLocalStorage(); // Persist changes
     }
     function handleCardDragEnd() {
         if (cardAnimationFrameId) { cancelAnimationFrame(cardAnimationFrameId); cardAnimationFrameId = null; }
@@ -426,27 +426,32 @@
         if (!draggedColumnItem || !droppedColumnId || droppedColumnId !== draggedColumnItem.id) {
             cleanupColumnDragState(); return;
         }
+        
         const fromIndex = boardColumns.findIndex(col => col.id === draggedColumnItem!.id);
         if (fromIndex > -1 && columnDragOverIndex !== null && columnDragOverIndex !== fromIndex) {
             const [movedColumn] = boardColumns.splice(fromIndex, 1);
             boardColumns.splice(columnDragOverIndex, 0, movedColumn);
-            boardColumns = [...boardColumns];
-            saveBoardStateToLocalStorage();
+            boardColumns = [...boardColumns]; // Trigger reactivity
+            saveBoardStateToLocalStorage(); // Persist changes
         }
+        // No cleanupColumnDragState() here, it's called in dragEnd
     }
     function handleColumnDragEnd() {
         if (columnAnimationFrameId) { cancelAnimationFrame(columnAnimationFrameId); columnAnimationFrameId = null; }
         if (activeDraggedColumnElement) {
             activeDraggedColumnElement.classList.remove('dragging-column');
-            activeDraggedColumnElement.style.position = ''; activeDraggedColumnElement.style.left = ''; activeDraggedColumnElement.style.top = ''; activeDraggedColumnElement.style.width = ''; activeDraggedColumnElement.style.height = ''; activeDraggedColumnElement.style.zIndex = ''; activeDraggedColumnElement.style.transformOrigin = ''; activeDraggedColumnElement.style.transform = '';
+            activeDraggedColumnElement.style.position = ''; activeDraggedColumnElement.style.left = '';
+            activeDraggedColumnElement.style.top = ''; activeDraggedColumnElement.style.width = '';
+            activeDraggedColumnElement.style.height = ''; activeDraggedColumnElement.style.zIndex = '';
+            activeDraggedColumnElement.style.transformOrigin = ''; activeDraggedColumnElement.style.transform = '';
         }
         cleanupColumnDragState();
     }
     function cleanupColumnDragState() { draggedColumnItem = null; activeDraggedColumnElement = null; columnDragOverIndex = null; columnDragOffsetX = 0; columnDragOffsetY = 0; velocityX = 0; velocityY = 0; currentColumnX = 0; currentColumnY = 0; targetColumnX = 0; targetColumnY = 0; currentRotation = 0; targetRotation = 0; rotationVelocity = 0; currentSkewX = 0; targetSkewX = 0; skewXVelocity = 0; if(columnAnimationFrameId) cancelAnimationFrame(columnAnimationFrameId); columnAnimationFrameId = null; }
-
+    // --- END KANBAN DRAG/DROP FUNCTIONS ---
 </script>
 
-<!-- HTML Structure -->
+<!-- HTML Structure (Identical to your provided HTML, so not repeated here for brevity) -->
 <div class="page-wrapper font-sans">
 	{#if isSidebarOpen}
     <aside
@@ -468,7 +473,7 @@
              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="nav-icon" aria-hidden="true"><path fill-rule="evenodd" d="M1 4a1 1 0 011-1h16a1 1 0 011 1v2.5a1 1 0 01-1 1H2a1 1 0 01-1-1V4zM2 9.5a1 1 0 011-1h4.5a1 1 0 011 1v6.5a1 1 0 01-1 1H3a1 1 0 01-1-1V9.5zM12.5 9.5A1 1 0 0011.5 10.5v6.5a1 1 0 001 1h4.5a1 1 0 001-1V9.5a1 1 0 00-1-1h-4.5z" clip-rule="evenodd" /></svg>
             <span>Dashboard</span>
           </a>
-          <a href="/kanban" class="nav-link" class:active={$page.url.pathname.startsWith('/kanban') || $page.url.pathname.startsWith('/tasks')}>
+          <a href="/kanban" class="nav-link" class:active={$page.url.pathname.startsWith('/kanban') || $page.url.pathname.startsWith('/tasks')}> <!-- Updated active check -->
             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="nav-icon" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12h3.75M9 15h3.75M9 18h3.75m3 .75H18a2.25 2.25 0 0 0 2.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 0 0-1.123-.08m-5.801 0c-.065.21-.1.433-.1.664 0 .414.336.75.75.75h4.5a.75.75 0 0 0 .75-.75 2.25 2.25 0 0 0-.1-.664m-5.8 0A2.251 2.251 0 0 1 13.5 2.25H15c1.012 0 1.867.668 2.15 1.586m-5.8 0c-.376.023-.75.05-1.124.08C9.095 4.01 8.25 4.973 8.25 6.108V8.25m0 0H4.875c-.621 0-1.125.504-1.125 1.125v11.25c0 .621.504 1.125 1.125 1.125h9.75c.621 0 1.125-.504 1.125-1.125V9.375c0-.621-.504-1.125-1.125-1.125H8.25ZM6.75 12h.008v.008H6.75V12Zm0 3h.008v.008H6.75V15Zm0 3h.008v.008H6.75V18Z" /></svg>
             <span>Kanban Board</span>
           </a>
@@ -482,15 +487,10 @@
           </a>
         </nav>
       </div>
-        <form method="POST" action="?/logout" use:enhance={() => {
-            if (browser) localStorage.removeItem(KANBAN_STORAGE_KEY);
-            return async ({ update }) => { await update(); };
-        }}>
-            <button type="submit" class="logout-button">
-                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="nav-icon" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0 0 13.5 3h-6a2.25 2.25 0 0 0-2.25 2.25v13.5A2.25 2.25 0 0 0 7.5 21h6a2.25 2.25 0 0 0 2.25-2.25V15m3 0 3-3m0 0-3-3m3 3H9" /></svg>
-                <span>Log out</span>
-            </button>
-        </form>
+		<button on:click={handleLogout} class="logout-button">
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="nav-icon" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0 0 13.5 3h-6a2.25 2.25 0 0 0-2.25 2.25v13.5A2.25 2.25 0 0 0 7.5 21h6a2.25 2.25 0 0 0 2.25-2.25V15m3 0 3-3m0 0-3-3m3 3H9" /></svg>
+        <span>Log out</span>
+      </button>
     </aside>
 	{/if}
 
@@ -529,12 +529,7 @@
                     <div id="profileWindow" class="dropdown-window hidden-dropdown">
                         <h3 class="dropdown-title">Profile</h3>
                         <p class="dropdown-user-welcome">Welcome, {usernameForDisplay}!</p>
-                        <form method="POST" action="?/logout" use:enhance={() => {
-                            if (browser) localStorage.removeItem(KANBAN_STORAGE_KEY);
-                            return async ({ update }) => { await update(); };
-                        }}>
-                            <button type="submit" class="profile-dropdown-button logout-action-button">Logout</button>
-                        </form>
+                        <button on:click={handleLogout} class="profile-dropdown-button logout-action-button">Logout</button>
                     </div>
                 </div>
                 <button id="darkModeToggle" aria-label="Toggle Dark Mode" class="darkmode-toggle-button">
@@ -548,7 +543,7 @@
 
         <main class="main-content-kanban">
             <div class="board-header-kanban">
-                <h1 class="board-title-kanban">My Workspaces</h1>
+                <h1 class="board-title-kanban">Project Alpha Tasks</h1>
             </div>
             <div
                 class="kanban-board-scroll-container"
@@ -557,30 +552,20 @@
                 on:drop={handleColumnDropOnBoard}
             >
                 <div class="kanban-board">
-                    {#if data.error}
-                        <p class="p-4 text-red-600">Error loading board: {data.error}</p>
-                    {:else if !boardColumns || boardColumns.length === 0}
-                        {#if !data.workspaces || data.workspaces.length === 0}
-                             <p class="p-4 text-gray-500">No workspaces found. Consider adding some in Firestore or checking server logs.</p>
-                        {:else}
-                            <p class="p-4 text-gray-500">Initializing board...</p> <!-- Or "No tasks found for these workspaces." -->
-                        {/if}
-                    {/if}
-
                     {#each boardColumns as column, i (column.id)}
                         {#if draggedColumnItem && columnDragOverIndex === i }
                             <div class="column-drop-placeholder" style="height: {activeDraggedColumnElement?.offsetHeight || 150}px;"></div>
                         {/if}
-                        <div
-                            class="kanban-column"
-                            class:drag-over-column={currentCardDragOverInfo?.columnId === column.id && !currentCardDragOverInfo?.overTaskId && draggedCardItem}
-                            data-column-id={column.id}
-                            on:dragover={(e) => { if(draggedCardItem) handleCardDragOverItem(e, column.id); else e.preventDefault(); }}
-                            on:dragleave={(e) => { if(draggedCardItem) handleCardDragLeaveItem(e, 'column', column.id);}}
+                        <div 
+                            class="kanban-column" 
+                            class:drag-over-column={currentCardDragOverInfo?.columnId === column.id && !currentCardDragOverInfo?.overTaskId && draggedCardItem} 
+                            data-column-id={column.id} 
+                            on:dragover={(e) => { if(draggedCardItem) handleCardDragOverItem(e, column.id); else e.preventDefault(); }} 
+                            on:dragleave={(e) => { if(draggedCardItem) handleCardDragLeaveItem(e, 'column', column.id);}} 
                             on:drop={(e) => { if(draggedCardItem) handleDropOnCardOrColumn(e, column.id);}}
                         >
                             <div class="column-header" draggable="true" on:dragstart={(e) => handleColumnDragStart(e, column)} on:drag={handleColumnDrag} on:dragend={handleColumnDragEnd}>
-                                <h3 class="column-title">{column.title || 'Loading Name...'}</h3> <!-- Check this -->
+                                <h3 class="column-title">{column.title}</h3>
                                 <span class="column-task-count">{column.tasks.length}</span>
                                 <button class="column-options-button" title="Column options">
                                     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="16" height="16"><path d="M12 3C10.9 3 10 3.9 10 5C10 6.1 10.9 7 12 7C13.1 7 14 6.1 14 5C14 3.9 13.1 3 12 3ZM12 17C10.9 17 10 17.9 10 19C10 20.1 10.9 21 12 21C13.1 21 14 20.1 14 19C14 17.9 13.1 17 12 17ZM12 10C10.9 10 10 10.9 10 12C10 13.1 10.9 14 12 14C13.1 14 14 13.1 14 12C14 10.9 13.1 10 12 10Z"></path></svg>
@@ -588,24 +573,24 @@
                             </div>
                             <div class="kanban-column-content">
                                 {#if column.tasks.length === 0 && !draggedCardItem && !(currentCardDragOverInfo?.columnId === column.id && draggedCardItem)}
-                                    <div
-                                        class="empty-column-dropzone"
-                                        on:dragover={(e) => { if(draggedCardItem) handleCardDragOverItem(e, column.id); else e.preventDefault(); }}
+                                    <div 
+                                        class="empty-column-dropzone" 
+                                        on:dragover={(e) => { if(draggedCardItem) handleCardDragOverItem(e, column.id); else e.preventDefault(); }} 
                                         on:drop={(e) => { if(draggedCardItem) handleDropOnCardOrColumn(e, column.id);}}
                                     >Drop card here</div>
                                 {/if}
                                 {#each column.tasks as task (task.id)}
-                                    <div
-                                        class="kanban-card priority-{task.priority || 'standard'}"
-                                        class:drag-over-card-before={currentCardDragOverInfo?.overTaskId === task.id && currentCardDragOverInfo?.position === 'before' && activeDraggedCardElement?.id !== `task-${task.id}` }
-                                        class:drag-over-card-after={currentCardDragOverInfo?.overTaskId === task.id && currentCardDragOverInfo?.position === 'after' && activeDraggedCardElement?.id !== `task-${task.id}` }
-                                        draggable="true"
-                                        id="task-{task.id}"
-                                        on:dragstart={(e) => handleCardDragStart(e, task, column.id)}
-                                        on:drag={handleCardDragMove}
-                                        on:dragend={handleCardDragEnd}
-                                        on:dragover={(e) => handleCardDragOverItem(e, column.id, task.id)}
-                                        on:dragleave={(e) => handleCardDragLeaveItem(e, 'card', task.id)}
+                                    <div 
+                                        class="kanban-card priority-{task.priority || 'standard'}" 
+                                        class:drag-over-card-before={currentCardDragOverInfo?.overTaskId === task.id && currentCardDragOverInfo?.position === 'before' && activeDraggedCardElement?.id !== `task-${task.id}` } 
+                                        class:drag-over-card-after={currentCardDragOverInfo?.overTaskId === task.id && currentCardDragOverInfo?.position === 'after' && activeDraggedCardElement?.id !== `task-${task.id}` } 
+                                        draggable="true" 
+                                        id="task-{task.id}" 
+                                        on:dragstart={(e) => handleCardDragStart(e, task, column.id)} 
+                                        on:drag={handleCardDragMove} 
+                                        on:dragend={handleCardDragEnd} 
+                                        on:dragover={(e) => handleCardDragOverItem(e, column.id, task.id)} 
+                                        on:dragleave={(e) => handleCardDragLeaveItem(e, 'card', task.id)} 
                                         on:drop={(e) => handleDropOnCardOrColumn(e, column.id, task.id)}
                                     >
                                         <div class="card-labels"></div>
@@ -619,8 +604,8 @@
                                         </div>
                                     </div>
                                 {/each}
-                                {#if !draggedColumnItem && !draggedCardItem }
-                                    <button class="add-card-button" on:click={() => alert(`Add card to workspace: ${column.title} (ID: ${column.id})`)}>+ Add a card</button>
+                                {#if !draggedColumnItem && !draggedCardItem && column.tasks.length > 0 }  
+                                    <button class="add-card-button">+ Add a card</button>
                                 {/if}
                             </div>
                         </div>
@@ -629,7 +614,7 @@
                         <div class="column-drop-placeholder" style="height: {activeDraggedColumnElement?.offsetHeight || 150}px;"></div>
                     {/if}
                     <div class="add-list-wrapper">
-                        <button class="add-list-button" on:click={() => alert('Functionality to add a new workspace (column) to be implemented. This would involve adding a new document to the "workspaces" collection in Firestore.')}>
+                        <button class="add-list-button">
                             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="16" height="16" style="margin-right: 4px;"><path d="M11 11V5H13V11H19V13H13V19H11V13H5V11H11Z"></path></svg>
                             Add another list
                         </button>
@@ -653,14 +638,14 @@
         background-color: #ffffff; /* Default light background for the entire wrapper */
     }
     canvas { display: block; }
-    .hidden-dropdown { display: none !important; }
+    .hidden-dropdown { display: none !important; } 
     .capitalize { text-transform: capitalize; }
 
 	/* --- Sidebar --- */
     .sidebar-container {
-        background-color: #ffffff;
-        border-right: 1px solid #e5e7eb;
-        color: #374151;
+        background-color: #ffffff; 
+        border-right: 1px solid #e5e7eb; 
+        color: #374151; 
         position: fixed; top: 0; left: 0; height: 100%; width: 16rem; /* w-64 */
         box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1), 0 4px 6px -2px rgba(0,0,0,0.05); /* shadow-lg */
         z-index: 50; display: flex; flex-direction: column; justify-content: space-between;
@@ -675,10 +660,10 @@
     }
     .sidebar-logo-img { width: 2rem; height: 2rem; } /* w-8 h-8 */
     .sidebar-title { color: #1f2937; font-size: 1.25rem; font-weight: 700; } /* text-xl font-bold */
-
+    
     .sidebar-nav { display: flex; flex-direction: column; gap: 0.5rem; /* gap-2 */ }
     .nav-link {
-        color: #374151;
+        color: #374151; 
         display: flex; align-items: center; gap: 0.75rem; /* gap-3 */
         padding: 0.5rem 0.75rem; /* px-3 py-2 */
         border-radius: 0.375rem; /* rounded-md */
@@ -693,14 +678,13 @@
     .nav-icon { width: 1.25rem; height: 1.25rem; } /* w-5 h-5 */
     .nav-link.active .nav-icon { filter: brightness(0) invert(1); }
 
-    .logout-button { /* Applied to the button inside the form */
+    .logout-button {
         color: #374151;
         display: flex; align-items: center; gap: 0.75rem;
         padding: 0.5rem 0.75rem; border-radius: 0.375rem; font-weight: 600;
-        width: 100%; margin-top: auto; /* Pushes to bottom if in flex column */
+        width: 100%; margin-top: auto;
         transition: background-color 150ms ease;
         background: none; border: none; cursor: pointer; text-align: left;
-        font-family: inherit; font-size: inherit;
     }
     .logout-button:hover { background-color: #f3f4f6; }
     .logout-button .nav-icon { width: 1.25rem; height: 1.25rem; }
@@ -708,14 +692,14 @@
     /* --- Top Header --- */
     .top-header {
         position: fixed; top: 0; /* left: 0; by default */ right: 0;
-        width: 100%;
+        width: 100%; 
         display: flex; align-items: center; justify-content: space-between;
         padding: 0 1rem; height: 60px; z-index: 40;
         box-shadow: 0 1px 3px rgba(0,0,0,0.05);
         transition: background-color 0.2s, border-color 0.2s, left 0.3s ease; /* Added left transition */
-        background-color: #ffffff;
+        background-color: #ffffff; 
         border-bottom: 1px solid #e5e7eb;
-        color: #1f2937;
+        color: #1f2937; 
         box-sizing: border-box;
     }
     .header-left { display: flex; align-items: center; gap: 0.75rem; }
@@ -723,12 +707,12 @@
         background: none; border: none; cursor: pointer; padding: 0.5rem;
         border-radius: 9999px; transition: background-color 0.15s ease;
         display: flex; align-items: center; justify-content: center;
-        color: inherit;
+        color: inherit; 
     }
     .top-header .menu-btn svg { width: 1.5rem; height: 1.5rem; }
     .top-header .menu-btn:hover { background-color: #f3f4f6; }
     .top-header .logo { display: flex; align-items: center; gap: 0.5rem; text-decoration: none;}
-    .top-header .logo img { height: 2rem; width: auto; }
+    .top-header .logo img { height: 2rem; width: auto; } 
     .top-header .logo .top-header-logo-text { color: #1f2937; font-weight: 600; font-size: 1.25rem; }
 
     .top-header .header-icons { display: flex; align-items: center; gap: 0.25rem; }
@@ -740,8 +724,8 @@
     }
     .top-header .header-icons .header-icon-btn svg { width: 1.25rem; height: 1.25rem; }
     .top-header .header-icons .header-icon-btn:hover { background-color: #f3f4f6; }
-
-    .darkmode-toggle-button {
+    
+    .darkmode-toggle-button { 
         margin-left: 0.5rem; padding: 0.375rem;
         background: none; border: none; cursor: pointer;
         line-height: 0; display: flex; align-items: center; justify-content: center;
@@ -752,22 +736,22 @@
     .darkmode-toggle-button:hover { background-color: #f3f4f6; }
 
     /* Dropdown Windows */
-    .relative { position: relative; }
+    .relative { position: relative; } 
     .dropdown-window {
         position: absolute; right: 0; top: calc(100% + 8px);
-        border-radius: 0.5rem;
+        border-radius: 0.5rem; 
         box-shadow: 0 4px 12px rgba(0,0,0,0.1);
-        padding: 0.75rem;
+        padding: 0.75rem; 
         z-index: 50;
         opacity: 0; transform: translateY(-5px) scale(0.98);
         transition: opacity 0.15s ease-out, transform 0.15s ease-out;
         pointer-events: none; visibility: hidden;
-        background-color: #ffffff;
-        border: 1px solid #e5e7eb;
-        color: #374151;
+        background-color: #ffffff; 
+        border: 1px solid #e5e7eb; 
+        color: #374151; 
         box-sizing: border-box;
     }
-    .dropdown-window.w-80 { width: 20rem; }
+    .dropdown-window.w-80 { width: 20rem; } 
     .dropdown-window:not(.hidden-dropdown) {
         opacity: 1; transform: translateY(0) scale(1);
         pointer-events: auto; visibility: visible;
@@ -779,27 +763,26 @@
     .dropdown-link { font-size: 0.75rem; color: #2563eb; margin-top: 0.5rem; display: block; }
     .dropdown-link:hover { text-decoration: underline; }
     .dropdown-user-welcome { font-size: 0.75rem; margin-bottom: 0.5rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;}
-    .profile-dropdown-button.logout-action-button { /* Applied to button inside form */
-        background-color: #fee2e2; color: #b91c1c;
+    .profile-dropdown-button.logout-action-button { 
+        background-color: #fee2e2; color: #b91c1c; 
         font-size: 0.75rem; padding: 0.375rem 0.5rem; border-radius: 0.25rem;
         width: 100%; text-align: left;
         transition: background-color 150ms; border: none; cursor: pointer;
-        font-family: inherit;
     }
     .profile-dropdown-button.logout-action-button:hover { background-color: #fecaca; }
-
+    
     .main-content-wrapper {
         flex: 1;
         display: flex;
         flex-direction: column;
-        overflow: hidden;
+        overflow: hidden; 
     }
 
     /* Main Content Area for Kanban Board itself */
     .main-content-kanban {
         padding-top: 60px; /* Fixed header height */
-        flex-grow: 1; display: flex; flex-direction: column;
-        overflow: hidden; box-sizing: border-box;
+        flex-grow: 1; display: flex; flex-direction: column; 
+        overflow: hidden; box-sizing: border-box; 
         background-color: var(--bg-light);
         color: var(--text-light-primary);
     }
@@ -829,7 +812,7 @@
     :global(body.dark) .dropdown-link { color: #60a5fa; }
     :global(body.dark) .profile-dropdown-button.logout-action-button { background-color: #7f1d1d; color: #fca5a5; }
     :global(body.dark) .profile-dropdown-button.logout-action-button:hover { background-color: #991b1b; }
-
+    
     :global(body.dark) .main-content-kanban { background-color: var(--bg-dark); color: var(--text-dark-primary); }
 
 
@@ -841,10 +824,10 @@
         --text-dark-primary: #f3f4f6; --text-dark-secondary: #9ca3af;
         --border-light: #e5e7eb; --border-dark: #374151;
         /* Surface for elements ON the main background (e.g., cards, columns) */
-        --surface-light: #ffffff; --surface-dark: #1f2937;
+        --surface-light: #ffffff; --surface-dark: #1f2937; 
         --interactive-light: #2563eb; --interactive-dark: #1d4ed8;
-        --interactive-hover-light: #f0f4f8;
-        --interactive-hover-dark: #2c3a4f;
+        --interactive-hover-light: #f0f4f8; 
+        --interactive-hover-dark: #2c3a4f; 
         --priority-high-light: #ef4444; --priority-high-dark: #f87171;
         --priority-medium-light: #f59e0b; --priority-medium-dark: #fbbf24;
         --priority-low-light: #22c55e; --priority-low-dark: #4ade80;
@@ -853,76 +836,76 @@
 
     .kanban-board-scroll-container { flex-grow: 1; overflow-x: auto; overflow-y: hidden; padding: 10px; box-sizing: border-box; }
     .kanban-board { display: inline-flex; gap: 12px; padding-bottom: 10px; min-height: calc(100% - 10px); align-items: flex-start; box-sizing: border-box; }
-
+    
     .kanban-column { background-color: var(--surface-light); border: 1px solid var(--border-light); border-radius: 8px; width: 280px; flex-shrink: 0; display: flex; flex-direction: column; max-height: calc(100% - 10px); /* Max height relative to scroll container */ padding: 0; box-sizing: border-box; box-shadow: 0 2px 4px rgba(0,0,0,0.04); }
     :global(body.dark) .kanban-column { background-color: var(--surface-dark); border-color: var(--border-dark); box-shadow: 0 2px 4px rgba(0,0,0,0.2); }
     .kanban-column.drag-over-column { background-color: #e9eff1; }
     :global(body.dark) .kanban-column.drag-over-column { background-color: #2a3b4d; }
-
+    
     .kanban-column.dragging-column { opacity: 0.9; border: 2px solid var(--interactive-light); background-color: var(--surface-light); box-shadow: 0 10px 20px rgba(0,0,0,0.1), 0 6px 6px rgba(0,0,0,0.1); pointer-events: none; transition: opacity 0.2s ease; }
     :global(body.dark) .kanban-column.dragging-column { border-color: var(--interactive-dark); background-color: var(--surface-dark); }
-
+    
     .column-drop-placeholder { width: 280px; min-height: 100px; border: 2px dashed var(--border-light); background-color: rgba(0,0,0,0.02); border-radius: 8px; flex-shrink: 0; box-sizing: border-box; margin: 0 4px; }
     :global(body.dark) .column-drop-placeholder { border-color: var(--border-dark); background-color: rgba(255,255,255,0.02); }
-
+    
     .column-header { display: flex; align-items: center; justify-content: space-between; padding: 12px 14px; cursor: grab; box-sizing: border-box; user-select: none; border-bottom: 1px solid var(--border-light); }
     :global(body.dark) .column-header { border-bottom-color: var(--border-dark); }
     .column-title { font-size: 0.95em; font-weight: 600; color: var(--text-light-primary); margin: 0; flex-grow: 1; padding-right: 5px; }
     :global(body.dark) .column-title { color: var(--text-dark-primary); }
     .column-task-count { font-size: 0.8em; color: var(--text-light-secondary); margin-left: 8px; background-color: var(--bg-light); padding: 2px 6px; border-radius: 4px;}
     :global(body.dark) .column-task-count { color: var(--text-dark-secondary); background-color: var(--bg-dark); }
-
+    
     .column-options-button { background: transparent; border: none; color: var(--text-light-secondary); padding: 4px; cursor: pointer; border-radius: 999px; line-height: 1; transition: background-color 0.15s ease;}
     .column-options-button:hover { background-color: var(--interactive-hover-light); }
     :global(body.dark) .column-options-button { color: var(--text-dark-secondary); }
     :global(body.dark) .column-options-button:hover { background-color: var(--interactive-hover-dark); }
-
+    
     .kanban-column-content { overflow-y: auto; flex-grow: 1; padding: 10px; min-height: 30px; box-sizing: border-box; display: flex; flex-direction: column; gap: 8px; }
     .empty-column-dropzone { flex-grow: 1; min-height: 60px; border: 2px dashed var(--border-light); border-radius: 6px; margin: 0; display: flex; align-items: center; justify-content: center; color: var(--text-light-secondary); font-size: 0.9em; }
     :global(body.dark) .empty-column-dropzone { border-color: var(--border-dark); color: var(--text-dark-secondary); }
-
+    
     .kanban-column-content::-webkit-scrollbar { width: 8px; }
-    .kanban-column-content::-webkit-scrollbar-thumb { background-color: #cbd5e1; border-radius: 4px; }
+    .kanban-column-content::-webkit-scrollbar-thumb { background-color: #cbd5e1; border-radius: 4px; } 
     .kanban-column-content::-webkit-scrollbar-track { background-color: transparent; }
-    :global(body.dark) .kanban-column-content::-webkit-scrollbar-thumb { background-color: #475569; }
-
+    :global(body.dark) .kanban-column-content::-webkit-scrollbar-thumb { background-color: #475569; } 
+    
     .kanban-card { background-color: var(--surface-light); border-radius: 6px; box-shadow: 0 1px 2px rgba(0,0,0,0.06), 0 1px 1px rgba(0,0,0,0.04); padding: 10px 12px; margin-bottom: 0; cursor: grab; word-wrap: break-word; font-size: 14px; color: var(--text-light-primary); position: relative; transition: border-top 0.1s linear, border-bottom 0.1s linear, background-color 0.15s ease; box-sizing: border-box; border-top: 3px solid transparent; border-bottom: 3px solid transparent; border-left: 4px solid transparent; }
     :global(body.dark) .kanban-card { background-color: var(--surface-dark); color: var(--text-dark-primary); box-shadow: 0 1px 2px rgba(0,0,0,0.2), 0 1px 1px rgba(0,0,0,0.2); }
-    .kanban-card:hover:not(.dragging-card) { background-color: #f8fafc; }
-    :global(body.dark) .kanban-card:hover:not(.dragging-card) { background-color: #334155; }
-
+    .kanban-card:hover:not(.dragging-card) { background-color: #f8fafc; } 
+    :global(body.dark) .kanban-card:hover:not(.dragging-card) { background-color: #334155; } 
+    
     .kanban-card.dragging-card { opacity: 0.85; box-shadow: 0 8px 16px rgba(0,0,0,0.12); border-color: transparent !important; pointer-events: none; transition: opacity 0.2s ease-in-out; }
     :global(body.dark) .kanban-card.dragging-card { box-shadow: 0 8px 16px rgba(0,0,0,0.35); }
-
+    
     .kanban-card.drag-over-card-before { border-top-color: var(--interactive-light); }
     .kanban-card.drag-over-card-after { border-bottom-color: var(--interactive-light); }
     :global(body.dark) .kanban-card.drag-over-card-before { border-top-color: var(--interactive-dark); }
     :global(body.dark) .kanban-card.drag-over-card-after { border-bottom-color: var(--interactive-dark); }
-
+    
     .card-title { margin: 0 0 6px 0; font-size: 0.9rem; font-weight: 500; line-height: 1.4; display: block; }
     .card-description-preview { font-size: 0.8rem; color: var(--text-light-secondary); margin-bottom: 8px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; text-overflow: ellipsis; }
     :global(body.dark) .card-description-preview { color: var(--text-dark-secondary); }
-
+    
     .card-footer { display: flex; justify-content: space-between; align-items: center; min-height: 20px; margin-top: 4px; }
     .card-meta-icons { display: flex; align-items: center; gap: 10px; color: var(--text-light-secondary); }
     :global(body.dark) .card-meta-icons { color: var(--text-dark-secondary); }
     .meta-icon { display: flex; align-items: center; gap: 4px; font-size: 0.75em; }
     .due-date-text { font-size: 0.85em; }
-
+    
     .priority-high { border-left-color: var(--priority-high-light); }
     .priority-medium { border-left-color: var(--priority-medium-light); }
     .priority-low { border-left-color: var(--priority-low-light); }
-    .priority-standard { border-left-color: var(--border-light); }
+    .priority-standard { border-left-color: var(--border-light); } 
     :global(body.dark) .priority-high { border-left-color: var(--priority-high-dark); }
     :global(body.dark) .priority-medium { border-left-color: var(--priority-medium-dark); }
     :global(body.dark) .priority-low { border-left-color: var(--priority-low-dark); }
     :global(body.dark) .priority-standard { border-left-color: var(--border-dark); }
-
+    
     .add-card-button { background-color: transparent; border: none; color: var(--text-light-secondary); padding: 8px 10px; border-radius: 4px; text-align: left; width: 100%; cursor: pointer; font-size: 0.85em; box-sizing: border-box; transition: background-color 0.15s ease, color 0.15s ease; margin-top: 4px; }
     .add-card-button:hover { background-color: var(--interactive-hover-light); color: var(--interactive-light); }
     :global(body.dark) .add-card-button { color: var(--text-dark-secondary); }
     :global(body.dark) .add-card-button:hover { background-color: var(--interactive-hover-dark); color: var(--interactive-dark); }
-
+    
     .add-list-wrapper { background-color: rgba(0,0,0,0.04); border-radius: 8px; width: 280px; flex-shrink: 0; padding: 6px; height: fit-content; box-sizing: border-box; }
     :global(body.dark) .add-list-wrapper { background-color: rgba(255,255,255,0.04); }
     .add-list-button { background-color: transparent; border: none; color: var(--text-light-secondary); padding: 8px 10px; border-radius: 6px; text-align: left; width: 100%; cursor: pointer; font-size: 0.9em; box-sizing: border-box; transition: background-color 0.15s ease, color 0.15s ease; display: flex; align-items: center; font-weight: 500; }

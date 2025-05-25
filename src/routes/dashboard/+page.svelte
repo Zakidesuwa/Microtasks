@@ -342,7 +342,7 @@
              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-5 h-5" aria-hidden="true"><path fill-rule="evenodd" d="M1 4a1 1 0 011-1h16a1 1 0 011 1v2.5a1 1 0 01-1 1H2a1 1 0 01-1-1V4zM2 9.5a1 1 0 011-1h4.5a1 1 0 011 1v6.5a1 1 0 01-1 1H3a1 1 0 01-1-1V9.5zM12.5 9.5A1 1 0 0011.5 10.5v6.5a1 1 0 001 1h4.5a1 1 0 001-1V9.5a1 1 0 00-1-1h-4.5z" clip-rule="evenodd" /></svg>
             <span>Dashboard</span>
           </a>
-          <a href="/tasks"
+          <a href="/kanban"
             class="nav-link flex items-center gap-3 px-3 py-2 rounded-md font-semibold transition-colors duration-150"
             class:active={$page.url.pathname.startsWith('/tasks')}
           >

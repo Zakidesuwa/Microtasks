@@ -314,7 +314,7 @@
             </svg>
             <span>Dashboard</span>
           </a>
-          <a href="/tasks"
+          <a href="/kanban"
              class={`flex items-center gap-3 px-3 py-2 rounded-md font-semibold transition-colors duration-150
                     ${currentPath === '/tasks' ? (isDarkMode ? 'bg-blue-700 text-white' : 'bg-blue-600 text-white') : (isDarkMode ? 'text-zinc-300 hover:bg-zinc-700' : 'text-gray-700 hover:bg-gray-100')}`}
           >
@@ -402,16 +402,7 @@
     </header>
 
     <div class="flex-1 overflow-y-auto pt-[60px] pb-4 flex flex-col">
-        <div class={`w-full px-4 sm:px-6 py-3 flex items-center justify-between gap-3 shadow-sm flex-shrink-0 border-b ${isDarkMode ? 'bg-zinc-800 text-zinc-100 border-zinc-700' : 'bg-white text-gray-800 border-gray-200'}`}>
-            <div class="flex items-center gap-3">
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-7 h-7" aria-hidden="true"><path fill-rule="evenodd" d="M6.75 2.25A.75.75 0 017.5 3v1.5h9V3A.75.75 0 0118 3v1.5h.75a3 3 0 013 3v11.25a3 3 0 01-3 3H5.25a3 3 0 01-3-3V7.5a3 3 0 013-3H6V3a.75.75 0 01.75-.75zM5.25 6.75c-.621 0-1.125.504-1.125 1.125V18a1.125 1.125 0 001.125 1.125h13.5A1.125 1.125 0 0019.875 18V7.875c0-.621-.504-1.125-1.125-1.125H5.25z" clip-rule="evenodd" /></svg>
-                <span class="text-lg sm:text-xl font-semibold">Calendar</span>
-            </div>
-            <button on:click={() => openAddEventForm()} class={`px-3 py-1.5 text-sm font-medium rounded-md flex items-center gap-2 transition-colors ${isDarkMode ? 'bg-blue-700 hover:bg-blue-600 text-white' : 'bg-blue-600 hover:bg-blue-700 text-white'}`}>
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-4 h-4"><path d="M10.75 4.75a.75.75 0 00-1.5 0v4.5h-4.5a.75.75 0 000 1.5h4.5v4.5a.75.75 0 001.5 0v-4.5h4.5a.75.75 0 000-1.5h-4.5v-4.5z" /></svg>
-                Add Event
-            </button>
-        </div>
+       
         
         <div class="px-4 sm:px-6 mt-4">
             <h1 class={`text-xl sm:text-2xl font-semibold ${isDarkMode ? 'text-zinc-100' : 'text-gray-800'}`}>{greeting}, <span class={`${isDarkMode ? 'text-blue-400' : 'text-blue-600'}`}>{username.toUpperCase()}</span>!</h1>
