@@ -1,0 +1,486 @@
+{
+  ".svelte-kit/generated/server/internal.js": {
+    "file": "internal.js",
+    "name": "internal",
+    "src": ".svelte-kit/generated/server/internal.js",
+    "isEntry": true,
+    "imports": [
+      "_internal.js",
+      "_shared-server.js"
+    ]
+  },
+  "_client.js": {
+    "file": "chunks/client.js",
+    "name": "client",
+    "imports": [
+      "_exports.js",
+      "_index.js"
+    ]
+  },
+  "_exports.js": {
+    "file": "chunks/exports.js",
+    "name": "exports",
+    "imports": [
+      "_index.js"
+    ]
+  },
+  "_firebase.js": {
+    "file": "chunks/firebase.js",
+    "name": "firebase"
+  },
+  "_firebaseAdmin.js": {
+    "file": "chunks/firebaseAdmin.js",
+    "name": "firebaseAdmin"
+  },
+  "_html.js": {
+    "file": "chunks/html.js",
+    "name": "html"
+  },
+  "_index-server.js": {
+    "file": "chunks/index-server.js",
+    "name": "index-server",
+    "imports": [
+      "_index.js"
+    ]
+  },
+  "_index.js": {
+    "file": "chunks/index.js",
+    "name": "index"
+  },
+  "_index2.js": {
+    "file": "chunks/index2.js",
+    "name": "index"
+  },
+  "_internal.js": {
+    "file": "chunks/internal.js",
+    "name": "internal",
+    "imports": [
+      "_index.js",
+      "_shared-server.js"
+    ],
+    "dynamicImports": [
+      "src/hooks.server.ts"
+    ]
+  },
+  "_private.js": {
+    "file": "chunks/private.js",
+    "name": "private"
+  },
+  "_shared-server.js": {
+    "file": "chunks/shared-server.js",
+    "name": "shared-server"
+  },
+  "_stores.js": {
+    "file": "chunks/stores.js",
+    "name": "stores",
+    "imports": [
+      "_index.js",
+      "_client.js"
+    ]
+  },
+  "node_modules/@sveltejs/kit/src/runtime/components/svelte-5/error.svelte": {
+    "file": "entries/fallbacks/error.svelte.js",
+    "name": "entries/fallbacks/error.svelte",
+    "src": "node_modules/@sveltejs/kit/src/runtime/components/svelte-5/error.svelte",
+    "isEntry": true,
+    "imports": [
+      "_index.js",
+      "_client.js"
+    ]
+  },
+  "node_modules/@sveltejs/kit/src/runtime/server/index.js": {
+    "file": "index.js",
+    "name": "index",
+    "src": "node_modules/@sveltejs/kit/src/runtime/server/index.js",
+    "isEntry": true,
+    "imports": [
+      "_index.js",
+      "_internal.js",
+      "_index2.js",
+      "_exports.js",
+      "_shared-server.js"
+    ]
+  },
+  "src/hooks.server.ts": {
+    "file": "chunks/hooks.server.js",
+    "name": "hooks.server",
+    "src": "src/hooks.server.ts",
+    "isDynamicEntry": true,
+    "imports": [
+      "_firebaseAdmin.js"
+    ]
+  },
+  "src/routes/+layout.svelte": {
+    "file": "entries/pages/_layout.svelte.js",
+    "name": "entries/pages/_layout.svelte",
+    "src": "src/routes/+layout.svelte",
+    "isEntry": true,
+    "imports": [
+      "_index.js",
+      "_stores.js"
+    ],
+    "css": [
+      "_app/immutable/assets/_layout.Dn1HwRcb.css"
+    ]
+  },
+  "src/routes/+layout.ts": {
+    "file": "entries/pages/_layout.ts.js",
+    "name": "entries/pages/_layout.ts",
+    "src": "src/routes/+layout.ts",
+    "isEntry": true
+  },
+  "src/routes/+page.server.ts": {
+    "file": "entries/pages/_page.server.ts.js",
+    "name": "entries/pages/_page.server.ts",
+    "src": "src/routes/+page.server.ts",
+    "isEntry": true,
+    "imports": [
+      "_firebase.js",
+      "_index2.js"
+    ]
+  },
+  "src/routes/+page.svelte": {
+    "file": "entries/pages/_page.svelte.js",
+    "name": "entries/pages/_page.svelte",
+    "src": "src/routes/+page.svelte",
+    "isEntry": true,
+    "imports": [
+      "_index.js",
+      "_client.js",
+      "_firebase.js"
+    ],
+    "css": [
+      "_app/immutable/assets/_page.CLt-Xd55.css"
+    ]
+  },
+  "src/routes/ai-chat/+page.server.ts": {
+    "file": "entries/pages/ai-chat/_page.server.ts.js",
+    "name": "entries/pages/ai-chat/_page.server.ts",
+    "src": "src/routes/ai-chat/+page.server.ts",
+    "isEntry": true,
+    "imports": [
+      "_index2.js"
+    ]
+  },
+  "src/routes/ai-chat/+page.svelte": {
+    "file": "entries/pages/ai-chat/_page.svelte.js",
+    "name": "entries/pages/ai-chat/_page.svelte",
+    "src": "src/routes/ai-chat/+page.svelte",
+    "isEntry": true,
+    "imports": [
+      "_index.js",
+      "_index-server.js",
+      "_stores.js",
+      "_client.js"
+    ],
+    "css": [
+      "_app/immutable/assets/_page.1dZ7WSTP.css"
+    ]
+  },
+  "src/routes/api/auth/session/+server.ts": {
+    "file": "entries/endpoints/api/auth/session/_server.ts.js",
+    "name": "entries/endpoints/api/auth/session/_server.ts",
+    "src": "src/routes/api/auth/session/+server.ts",
+    "isEntry": true,
+    "imports": [
+      "_index2.js",
+      "_firebaseAdmin.js",
+      "_shared-server.js"
+    ]
+  },
+  "src/routes/api/chat/+server.ts": {
+    "file": "entries/endpoints/api/chat/_server.ts.js",
+    "name": "entries/endpoints/api/chat/_server.ts",
+    "src": "src/routes/api/chat/+server.ts",
+    "isEntry": true,
+    "imports": [
+      "_index2.js",
+      "_private.js"
+    ]
+  },
+  "src/routes/api/chats/+server.ts": {
+    "file": "entries/endpoints/api/chats/_server.ts.js",
+    "name": "entries/endpoints/api/chats/_server.ts",
+    "src": "src/routes/api/chats/+server.ts",
+    "isEntry": true,
+    "imports": [
+      "_index2.js"
+    ]
+  },
+  "src/routes/api/cron/send-reminders/+server.ts": {
+    "file": "entries/endpoints/api/cron/send-reminders/_server.ts.js",
+    "name": "entries/endpoints/api/cron/send-reminders/_server.ts",
+    "src": "src/routes/api/cron/send-reminders/+server.ts",
+    "isEntry": true,
+    "imports": [
+      "_index2.js",
+      "_firebaseAdmin.js",
+      "_private.js"
+    ]
+  },
+  "src/routes/api/pase-task-nlp/+server.ts": {
+    "file": "entries/endpoints/api/pase-task-nlp/_server.ts.js",
+    "name": "entries/endpoints/api/pase-task-nlp/_server.ts",
+    "src": "src/routes/api/pase-task-nlp/+server.ts",
+    "isEntry": true,
+    "imports": [
+      "_index2.js"
+    ]
+  },
+  "src/routes/api/v1/chat/+server.ts": {
+    "file": "entries/endpoints/api/v1/chat/_server.ts.js",
+    "name": "entries/endpoints/api/v1/chat/_server.ts",
+    "src": "src/routes/api/v1/chat/+server.ts",
+    "isEntry": true
+  },
+  "src/routes/calendar/+page.server.ts": {
+    "file": "entries/pages/calendar/_page.server.ts.js",
+    "name": "entries/pages/calendar/_page.server.ts",
+    "src": "src/routes/calendar/+page.server.ts",
+    "isEntry": true,
+    "imports": [
+      "_firebaseAdmin.js",
+      "_index2.js"
+    ]
+  },
+  "src/routes/calendar/+page.svelte": {
+    "file": "entries/pages/calendar/_page.svelte.js",
+    "name": "entries/pages/calendar/_page.svelte",
+    "src": "src/routes/calendar/+page.svelte",
+    "isEntry": true,
+    "imports": [
+      "_index.js",
+      "_index-server.js",
+      "_stores.js",
+      "_client.js"
+    ],
+    "css": [
+      "_app/immutable/assets/_page.DOXHXLdm.css"
+    ]
+  },
+  "src/routes/dashboard/+page.server.ts": {
+    "file": "entries/pages/dashboard/_page.server.ts.js",
+    "name": "entries/pages/dashboard/_page.server.ts",
+    "src": "src/routes/dashboard/+page.server.ts",
+    "isEntry": true,
+    "imports": [
+      "_firebaseAdmin.js",
+      "_index2.js"
+    ]
+  },
+  "src/routes/dashboard/+page.svelte": {
+    "file": "entries/pages/dashboard/_page.svelte.js",
+    "name": "entries/pages/dashboard/_page.svelte",
+    "src": "src/routes/dashboard/+page.svelte",
+    "isEntry": true,
+    "imports": [
+      "_index.js",
+      "_client.js",
+      "_exports.js"
+    ],
+    "css": [
+      "_app/immutable/assets/_page.DdUlOFAD.css"
+    ]
+  },
+  "src/routes/forgotpass/+page.server.ts": {
+    "file": "entries/pages/forgotpass/_page.server.ts.js",
+    "name": "entries/pages/forgotpass/_page.server.ts",
+    "src": "src/routes/forgotpass/+page.server.ts",
+    "isEntry": true,
+    "imports": [
+      "_firebase.js",
+      "_index2.js"
+    ]
+  },
+  "src/routes/forgotpass/+page.svelte": {
+    "file": "entries/pages/forgotpass/_page.svelte.js",
+    "name": "entries/pages/forgotpass/_page.svelte",
+    "src": "src/routes/forgotpass/+page.svelte",
+    "isEntry": true,
+    "imports": [
+      "_index.js",
+      "_firebase.js"
+    ],
+    "css": [
+      "_app/immutable/assets/_page.BGpIWMNg.css"
+    ]
+  },
+  "src/routes/home/+page.server.ts": {
+    "file": "entries/pages/home/_page.server.ts.js",
+    "name": "entries/pages/home/_page.server.ts",
+    "src": "src/routes/home/+page.server.ts",
+    "isEntry": true,
+    "imports": [
+      "_firebaseAdmin.js",
+      "_index2.js"
+    ]
+  },
+  "src/routes/home/+page.svelte": {
+    "file": "entries/pages/home/_page.svelte.js",
+    "name": "entries/pages/home/_page.svelte",
+    "src": "src/routes/home/+page.svelte",
+    "isEntry": true,
+    "imports": [
+      "_index.js",
+      "_client.js",
+      "_firebase.js"
+    ],
+    "css": [
+      "_app/immutable/assets/_page.DXB7JKqS.css"
+    ]
+  },
+  "src/routes/login/+page.server.ts": {
+    "file": "entries/pages/login/_page.server.ts.js",
+    "name": "entries/pages/login/_page.server.ts",
+    "src": "src/routes/login/+page.server.ts",
+    "isEntry": true,
+    "imports": [
+      "_firebase.js",
+      "_index2.js"
+    ]
+  },
+  "src/routes/login/+page.svelte": {
+    "file": "entries/pages/login/_page.svelte.js",
+    "name": "entries/pages/login/_page.svelte",
+    "src": "src/routes/login/+page.svelte",
+    "isEntry": true,
+    "imports": [
+      "_index.js",
+      "_client.js",
+      "_firebase.js"
+    ],
+    "css": [
+      "_app/immutable/assets/_page.CLt-Xd55.css"
+    ]
+  },
+  "src/routes/settings/+page.server.ts": {
+    "file": "entries/pages/settings/_page.server.ts.js",
+    "name": "entries/pages/settings/_page.server.ts",
+    "src": "src/routes/settings/+page.server.ts",
+    "isEntry": true,
+    "imports": [
+      "_index2.js",
+      "_firebaseAdmin.js"
+    ]
+  },
+  "src/routes/settings/+page.svelte": {
+    "file": "entries/pages/settings/_page.svelte.js",
+    "name": "entries/pages/settings/_page.svelte",
+    "src": "src/routes/settings/+page.svelte",
+    "isEntry": true,
+    "imports": [
+      "_index.js",
+      "_client.js",
+      "_firebase.js"
+    ],
+    "css": [
+      "_app/immutable/assets/_page.C_kf912G.css"
+    ]
+  },
+  "src/routes/signup/+page.server.js": {
+    "file": "entries/pages/signup/_page.server.js",
+    "name": "entries/pages/signup/_page.server",
+    "src": "src/routes/signup/+page.server.js",
+    "isEntry": true,
+    "imports": [
+      "_index2.js",
+      "_firebase.js"
+    ]
+  },
+  "src/routes/signup/+page.svelte": {
+    "file": "entries/pages/signup/_page.svelte.js",
+    "name": "entries/pages/signup/_page.svelte",
+    "src": "src/routes/signup/+page.svelte",
+    "isEntry": true,
+    "imports": [
+      "_index.js",
+      "_firebase.js",
+      "_client.js"
+    ],
+    "css": [
+      "_app/immutable/assets/_page.BOUwtBI3.css"
+    ]
+  },
+  "src/routes/support/+page.svelte": {
+    "file": "entries/pages/support/_page.svelte.js",
+    "name": "entries/pages/support/_page.svelte",
+    "src": "src/routes/support/+page.svelte",
+    "isEntry": true
+  },
+  "src/routes/tasks/+page.server.ts": {
+    "file": "entries/pages/tasks/_page.server.ts.js",
+    "name": "entries/pages/tasks/_page.server.ts",
+    "src": "src/routes/tasks/+page.server.ts",
+    "isEntry": true,
+    "imports": [
+      "_firebaseAdmin.js",
+      "_index2.js"
+    ]
+  },
+  "src/routes/tasks/+page.svelte": {
+    "file": "entries/pages/tasks/_page.svelte.js",
+    "name": "entries/pages/tasks/_page.svelte",
+    "src": "src/routes/tasks/+page.svelte",
+    "isEntry": true,
+    "imports": [
+      "_index.js",
+      "_index-server.js",
+      "_client.js",
+      "_html.js"
+    ],
+    "css": [
+      "_app/immutable/assets/_page.ChgXb-x0.css"
+    ]
+  },
+  "src/routes/workspace/+page.server.ts": {
+    "file": "entries/pages/workspace/_page.server.ts.js",
+    "name": "entries/pages/workspace/_page.server.ts",
+    "src": "src/routes/workspace/+page.server.ts",
+    "isEntry": true,
+    "imports": [
+      "_firebaseAdmin.js",
+      "_index2.js",
+      "_private.js"
+    ]
+  },
+  "src/routes/workspace/+page.svelte": {
+    "file": "entries/pages/workspace/_page.svelte.js",
+    "name": "entries/pages/workspace/_page.svelte",
+    "src": "src/routes/workspace/+page.svelte",
+    "isEntry": true,
+    "imports": [
+      "_index.js",
+      "_index-server.js",
+      "_stores.js",
+      "_client.js"
+    ],
+    "css": [
+      "_app/immutable/assets/_page.Dpi-sZGR.css"
+    ]
+  },
+  "src/routes/workspace/[boardId]/+page.server.ts": {
+    "file": "entries/pages/workspace/_boardId_/_page.server.ts.js",
+    "name": "entries/pages/workspace/_boardId_/_page.server.ts",
+    "src": "src/routes/workspace/[boardId]/+page.server.ts",
+    "isEntry": true,
+    "imports": [
+      "_firebaseAdmin.js",
+      "_index2.js"
+    ]
+  },
+  "src/routes/workspace/[boardId]/+page.svelte": {
+    "file": "entries/pages/workspace/_boardId_/_page.svelte.js",
+    "name": "entries/pages/workspace/_boardId_/_page.svelte",
+    "src": "src/routes/workspace/[boardId]/+page.svelte",
+    "isEntry": true,
+    "imports": [
+      "_index.js",
+      "_index-server.js",
+      "_client.js",
+      "_html.js"
+    ],
+    "css": [
+      "_app/immutable/assets/_page.CMPfFv9B.css"
+    ]
+  }
+}

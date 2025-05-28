@@ -369,8 +369,16 @@
     }
 
     function showPageMessage(message: string, isError: boolean = false, duration: number = 4000) {
-        if (isError) pageActionError = message;
-        else pageActionSuccessMessage = message;
+        // Clear any existing messages first
+        pageActionError = undefined;
+        pageActionSuccessMessage = undefined;
+
+        if (isError) {
+            pageActionError = message;
+        } else {
+            pageActionSuccessMessage = message;
+        }
+
         if (messageTimeoutId) clearTimeout(messageTimeoutId);
         messageTimeoutId = window.setTimeout(() => {
             pageActionError = undefined;
@@ -378,29 +386,8 @@
         }, duration);
     }
 
-    $: {
-        if (form) {
-            actionError = undefined;
-            if (form.type === 'failure') {
-                const formErrors = form.data as any;
-                let errorMessageToShow: string | undefined = undefined;
-                if (showAddTaskModal && formErrors?.taskForm?.error) actionError = formErrors.taskForm.error;
-                else if (showEditTaskModal && formErrors?.taskForm?.error) actionError = formErrors.taskForm.error;
-                else if (formErrors?.taskForm?.error) errorMessageToShow = formErrors.taskForm.error;
-                else if (formErrors?.deleteTaskForm?.error) errorMessageToShow = formErrors.deleteTaskForm.error;
-                else if (formErrors?.batchDeleteForm?.error) errorMessageToShow = formErrors.batchDeleteForm.error;
-                else if (formErrors?.toggleCompleteForm?.error) errorMessageToShow = formErrors.toggleCompleteForm.error;
-                else if (formErrors?.error) errorMessageToShow = formErrors.error;
-                if (errorMessageToShow && !actionError) showPageMessage(errorMessageToShow, true);
-                else if (!actionError && !errorMessageToShow && Object.keys(formErrors || {}).length > 0) showPageMessage('An unknown error occurred.', true);
-            } else if (form.type === 'success') {
-                const formSuccessData = form.data as any;
-                if (formSuccessData?.taskForm?.message) showPageMessage(formSuccessData.taskForm.message);
-                else if (formSuccessData?.deleteTaskForm?.successMessage) showPageMessage(formSuccessData.deleteTaskForm.successMessage);
-                else if (formSuccessData?.toggleCompleteForm?.successMessage) showPageMessage(formSuccessData.toggleCompleteForm.successMessage, false, 2500);
-            }
-        }
-    }
+    // Removed the reactive block for 'form' to handle messages directly within submit callbacks
+    // This simplifies message handling and avoids potential race conditions or unexpected reactivity.
 
     let selectedTaskIds = new Set<string>();
     function toggleTaskSelection(taskId: string) {
@@ -416,7 +403,9 @@
         newTaskDueDate = null;
         newTaskDueTime = null;
         newTaskPriority = 'standard';
-        actionError = undefined;
+        actionError = undefined; // Clear action error for new modal
+        pageActionError = undefined; // Clear page-level errors
+        pageActionSuccessMessage = undefined; // Clear page-level success messages
     }
     function closeAddTaskModal() { showAddTaskModal = false; isSubmitting = false; }
 
@@ -429,7 +418,9 @@
         editTaskDueTime = task.dueTime;
         editTaskPriority = task.priority?.toString() || 'standard';
         showEditTaskModal = true;
-        actionError = undefined;
+        actionError = undefined; // Clear action error for new modal
+        pageActionError = undefined; // Clear page-level errors
+        pageActionSuccessMessage = undefined; // Clear page-level success messages
     }
     function closeEditTaskModal() { showEditTaskModal = false; isSubmitting = false; taskToEdit = null; }
 
@@ -498,9 +489,21 @@
         return async ({ result, update }) => {
             let wasSuccessful = false;
             if (result.type === 'success') {
-                if (isActionAddTask && (result.data as any)?.taskForm?.success) wasSuccessful = true;
-                else if (isActionUpdateTask && (result.data as any)?.taskForm?.success) wasSuccessful = true;
+                if (isActionAddTask && (result.data as any)?.taskForm?.success) {
+                    showPageMessage((result.data as any).taskForm.message, false);
+                    wasSuccessful = true;
+                }
+                else if (isActionUpdateTask && (result.data as any)?.taskForm?.success) {
+                    showPageMessage((result.data as any).taskForm.message, false);
+                    wasSuccessful = true;
+                }
+            } else if (result.type === 'failure') {
+                const formErrors = result.data as any;
+                const errorMessage = formErrors?.taskForm?.error || formErrors?.error || 'An unknown error occurred.';
+                actionError = errorMessage; // Set actionError for modal-specific display
+                showPageMessage(errorMessage, true); // Also show as page-level error
             }
+
             await update({ reset: false });
             if (wasSuccessful) {
                 await invalidateAll();
@@ -511,11 +514,28 @@
         };
     };
 
-    function requestSingleDelete(task: { id: string; title: string }) { taskToConfirmDelete = task; showSingleDeleteConfirm = true; }
+    function requestSingleDelete(task: { id: string; title: string }) {
+        taskToConfirmDelete = task;
+        showSingleDeleteConfirm = true;
+        pageActionError = undefined; // Clear any existing page errors
+        pageActionSuccessMessage = undefined; // Clear any existing page success messages
+    }
     function cancelSingleDelete() { showSingleDeleteConfirm = false; taskToConfirmDelete = null; }
     const handleSingleDeleteSubmitCb: SubmitFunction = () => {
         isSubmitting = true;
-        return async ({ update }) => { await update(); isSubmitting = false; if (showSingleDeleteConfirm) cancelSingleDelete(); };
+        return async ({ result, update }) => {
+            if (result.type === 'success') {
+                showPageMessage((result.data as any)?.deleteTaskForm?.successMessage || 'Task deleted successfully.', false);
+                await invalidateAll(); // Ensure data is re-fetched after successful deletion
+            } else if (result.type === 'failure') {
+                const formErrors = result.data as any;
+                const errorMessage = formErrors?.deleteTaskForm?.error || formErrors?.error || 'An unknown error occurred while deleting the task.';
+                showPageMessage(errorMessage, true);
+            }
+            await update(); // Update the form state, which might trigger data re-fetch if not already done by invalidateAll
+            isSubmitting = false;
+            if (showSingleDeleteConfirm) cancelSingleDelete();
+        };
     };
     function confirmSingleDelete() {
         if (singleDeleteFormEl && taskToConfirmDelete) {
@@ -646,10 +666,10 @@
         <button id="hamburgerButton" class="menu-btn" on:click={toggleSidebar} aria-label="Toggle Sidebar">
           <img src="/Hamburger.png" alt="Menu" class="w-6 h-6" />
         </button>
-        <a href="/home" class="logo">
-          <img src="/logonamin.png" alt="Microtask Logo">
-          <span class={`${isDarkMode ? 'text-zinc-100' : 'text-gray-800'}`}>Microtask</span>
-        </a>
+      <a href="/home" class="logo">
+  <img src={isDarkMode ? "/logonamindarkmode.png" : "/logonamin.png"} alt="Microtask Logo">
+  <span class={`${isDarkMode ? 'text-zinc-100' : 'text-gray-800'}`}>Microtask</span>
+</a>
       </div>
       <div class="header-icons">
         <div class="relative">
@@ -684,15 +704,15 @@
     </header>
     {#if isSidebarOpen}
     <aside
-      id="sidebar"
-      class={`fixed top-0 left-0 h-full w-64 shadow-lg z-10000 flex flex-col justify-between p-4 border-r ${isDarkMode ? 'bg-zinc-800 border-zinc-700' : 'bg-white border-gray-200'}`}
-      transition:fly={{ x: -300, duration: 300, easing: quintOut }}
-    >
-      <div>
-        <div class="flex items-center gap-2 mb-8 pb-4 border-b ${isDarkMode ? 'border-zinc-700' : 'border-gray-200'}">
-          <img src="/logonamin.png" alt="Logo" class="w-8 h-8" />
-          <h1 class={`text-xl font-bold ${isDarkMode ? 'text-zinc-100' : 'text-gray-800'}`}>Microtask</h1>
-        </div>
+  id="sidebar"
+  class={`fixed top-0 left-0 h-full w-64 shadow-lg z-10000 flex flex-col justify-between p-4 border-r ${isDarkMode ? 'bg-zinc-800 border-zinc-700' : 'bg-white border-gray-200'}`}
+  transition:fly={{ x: -300, duration: 300, easing: quintOut }}
+>
+  <div>
+    <div class="flex items-center gap-2 mb-8 pb-4 border-b ${isDarkMode ? 'border-zinc-700' : 'border-gray-200'}">
+      <img src={isDarkMode ? "/logonamindarkmode.png" : "/logonamin.png"} alt="Logo" class="w-8 h-8" />
+      <h1 class={`text-xl font-bold ${isDarkMode ? 'text-zinc-100' : 'text-gray-800'}`}>Microtask</h1>
+    </div>
                 <nav class="flex flex-col gap-2">
           <a href="/home"
              class={`flex items-center gap-3 px-3 py-2 rounded-md font-semibold transition-colors duration-150
@@ -1212,10 +1232,10 @@
         font-weight: 600; font-size: 1.125rem; 
         text-decoration: none;
     }
-    .logo img { height: 2rem; width: auto; } 
-    .logo span { color: #111827; } 
-    :global(body.dark) .logo span { color: #f3f4f6; } 
-    :global(body.dark) .logo img { filter: invert(0.1) contrast(1.5) brightness(1.5) ; } 
+    .logo img { height: 2rem; width: auto; }
+.logo span { color: #111827; }
+:global(body.dark) .logo span { color: #f3f4f6; }
+/* :global(body.dark) .logo img { filter: invert(0.1) contrast(1.5) brightness(1.5) ; } */ /* Removed or commented out */
 
     .header-icons { display: flex; align-items: center; gap: 0.25rem; } 
     .header-icons button {

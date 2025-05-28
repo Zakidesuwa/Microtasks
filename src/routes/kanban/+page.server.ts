@@ -1,26 +1,34 @@
 import type { PageServerLoad, Actions, PageServerLoadEvent } from './$types.js';
 import { adminDb } from '$lib/server/firebaseAdmin.js';
 import { Timestamp, FieldValue } from 'firebase-admin/firestore';
+import type { CollectionReference, DocumentReference } from 'firebase-admin/firestore'; // Import helper types
 import { fail, redirect } from '@sveltejs/kit';
 
-// Interface for the raw data structure from Firestore
+// Interface for Workspace/Board data sent to the frontend
+export interface WorkspaceForFrontend {
+    id: string;
+    name: string;
+    createdAtISO?: string | null;
+}
+
+// Interface for the raw data structure from Firestore for Tasks
 interface FetchedTaskData {
     title: string;
     description?: string;
     isCompleted?: boolean;
-    createdAt?: Timestamp;
-    dueDate?: string | null; // YYYY-MM-DD
-    dueTime?: string | null; // HH:MM
-    completedAt?: Timestamp | null;
+    createdAt?: Timestamp; // This is a Firestore Timestamp when read
+    dueDate?: string | null;
+    dueTime?: string | null;
+    completedAt?: Timestamp | null; // This is a Firestore Timestamp or null when read
     userId?: string;
     priority?: string;
     tags?: string[];
     noteId?: string;
-    lastModified?: Timestamp;
+    lastModified?: Timestamp; // This is a Firestore Timestamp when read
     boardId?: string;
 }
 
-// Interface for the data structure sent to the frontend
+// Interface for Task data sent to the frontend
 export interface TaskForFrontend {
     id: string;
     title: string;
@@ -31,9 +39,9 @@ export interface TaskForFrontend {
     createdAtISO: string | null;
     dueDateISO: string | null;
     dueTime: string | null;
+    boardId: string;
 }
 
-// Define the expected shape of the user object we'll pass to the frontend
 interface UserForFrontend {
     name?: string;
 }
@@ -50,7 +58,6 @@ function getPreciseDueDateInTimezoneAsUTC(
     }
     try {
         const [year, month, day] = dateString.split('-').map(Number);
-
         let hoursInTargetTimezone = 23;
         let minutesInTargetTimezone = 59;
         let secondsInTargetTimezone = 59;
@@ -66,22 +73,18 @@ function getPreciseDueDateInTimezoneAsUTC(
             }
         }
         return new Date(Date.UTC(
-            year,
-            month - 1,
-            day,
+            year, month - 1, day,
             hoursInTargetTimezone - targetTimezoneOffsetHours,
-            minutesInTargetTimezone,
-            secondsInTargetTimezone,
-            msInTargetTimezone
+            minutesInTargetTimezone, secondsInTargetTimezone, msInTargetTimezone
         ));
     } catch (e) {
-        console.warn(`[getPreciseDueDateInTimezoneAsUTC] Error parsing date/time for target timezone: ${dateString} ${timeString}`, e);
+        console.warn(`[getPreciseDueDateInTimezoneAsUTC] Error parsing date/time: ${dateString} ${timeString}`, e);
         return null;
     }
 }
 
-function mapTaskData(docSnapshot: FirebaseFirestore.QueryDocumentSnapshot): TaskForFrontend {
-    const docData = docSnapshot.data() as FetchedTaskData;
+function mapFetchedTaskToFrontend(docSnapshot: FirebaseFirestore.QueryDocumentSnapshot<FetchedTaskData>): TaskForFrontend {
+    const docData = docSnapshot.data(); // docData is now strongly typed as FetchedTaskData
     const taskId = docSnapshot.id;
     const createdAtTimestamp = docData.createdAt;
     const storedDueDateString = docData.dueDate;
@@ -97,32 +100,16 @@ function mapTaskData(docSnapshot: FirebaseFirestore.QueryDocumentSnapshot): Task
         PHILIPPINES_TIMEZONE_OFFSET_HOURS
     );
 
-    let dueDateISO: string | null = null;
-    if (storedDueDateString && /\d{4}-\d{2}-\d{2}/.test(storedDueDateString)) {
-        try {
-            const [year, month, day] = storedDueDateString.split('-').map(Number);
-            dueDateISO = new Date(Date.UTC(year, month - 1, day)).toISOString();
-        } catch (e) {
-            console.warn(`[mapTaskData] Error creating dueDateISO for task ${taskId}: ${storedDueDateString}`, e);
-        }
-    }
+    const dueDateISO = storedDueDateString && /\d{4}-\d{2}-\d{2}/.test(storedDueDateString) ? storedDueDateString : null;
 
     let status: TaskForFrontend['status'];
     const isCompleted = docData.isCompleted ?? false;
     const now = new Date();
 
     if (isCompleted) {
-        if (completedAtDate && preciseDueDateDeadlineUTC && completedAtDate.getTime() > preciseDueDateDeadlineUTC.getTime()) {
-            status = 'late';
-        } else {
-            status = 'complete';
-        }
+        status = (completedAtDate && preciseDueDateDeadlineUTC && completedAtDate.getTime() > preciseDueDateDeadlineUTC.getTime()) ? 'late' : 'complete';
     } else {
-        if (preciseDueDateDeadlineUTC && now.getTime() > preciseDueDateDeadlineUTC.getTime()) {
-            status = 'incomplete';
-        } else {
-            status = 'pending';
-        }
+        status = (preciseDueDateDeadlineUTC && now.getTime() > preciseDueDateDeadlineUTC.getTime()) ? 'incomplete' : 'pending';
     }
 
     return {
@@ -135,63 +122,64 @@ function mapTaskData(docSnapshot: FirebaseFirestore.QueryDocumentSnapshot): Task
         createdAtISO: createdAtISO,
         dueDateISO: dueDateISO,
         dueTime: storedDueTimeString ?? null,
+        boardId: docData.boardId || 'unassigned_tasks_board',
     };
 }
+
+// Explicitly type the collection reference
+const tasksCollection = adminDb.collection('tasks') as CollectionReference<FetchedTaskData>;
 
 export const load: PageServerLoad = async ({ locals, url }: PageServerLoadEvent) => {
     const userId = locals.userId;
     let userForFrontend: UserForFrontend | undefined = undefined;
+    let workspacesForFrontend: WorkspaceForFrontend[] = [];
+
+    const filterFromDate = url.searchParams.get('filterFromDate');
+    const filterToDate = url.searchParams.get('filterToDate');
+    
+    try {
+        // Example: assuming workspaces are user-specific or you want to fetch them
+        const workspacesQuery = adminDb.collection('workspaces').where('ownerId', '==', userId);
+        const workspacesSnapshot = await workspacesQuery.orderBy('createdAt', 'asc').get();
+        if (!workspacesSnapshot.empty) {
+            workspacesForFrontend = workspacesSnapshot.docs.map(doc => {
+                const data = doc.data();
+                const createdAtTimestamp = data.createdAt as Timestamp | undefined;
+                return {
+                    id: doc.id,
+                    name: data.name || 'Unnamed Workspace',
+                    createdAtISO: createdAtTimestamp ? createdAtTimestamp.toDate().toISOString() : new Date().toISOString(),
+                };
+            });
+        }
+    } catch (wsError: any) {
+        console.error("[Server Load /kanban] Error fetching workspaces (optional data):", wsError);
+    }
 
     if (!userId) {
         return {
             user: userForFrontend,
+            workspaces: workspacesForFrontend,
             tasks: [],
             error: 'User not authenticated. Please log in.',
-            filterFromDate: null,
-            filterToDate: null
+            filterFromDate,
+            filterToDate
         };
     }
 
-    // --- FETCH USER DETAILS (NAME) ---
     try {
-        // --- MODIFIED LINE: Querying 'credentials' collection ---
         const credDocRef = adminDb.collection('credentials').doc(userId);
         const credDoc = await credDocRef.get();
-
-        if (credDoc.exists) {
-            const credData = credDoc.data();
-            // Assuming the field is 'username' in the 'credentials' document.
-            // Adjust if it's different (e.g., credData?.displayName, credData?.name)
-            userForFrontend = { name: credData?.username || 'User' };
-            // For debugging:
-            // console.log(`[Server Load /tasks] CredentialsData for ${userId}:`, JSON.stringify(credData));
-            console.log(`[Server Load /tasks] Fetched user name from credentials: ${userForFrontend.name}`);
-        } else {
-            console.warn(`[Server Load /tasks] Credentials document not found for userId: ${userId}. Defaulting name to 'User'.`);
-            userForFrontend = { name: 'User' };
-        }
+        userForFrontend = { name: credDoc.exists ? (credDoc.data()?.username || 'User') : 'User' };
     } catch (userError: any) {
-        console.error(`[Server Load /tasks] Error fetching user credentials for ${userId}:`, userError);
-        userForFrontend = { name: 'User' }; // Fallback on error
+        console.error(`[Server Load /kanban] Error fetching user credentials for ${userId}:`, userError);
+        userForFrontend = { name: 'User' };
     }
-    // --- END FETCH USER DETAILS ---
-
-    console.log(`[Server Load /tasks] Current Server Time (UTC ISO): ${new Date().toISOString()}`);
-    console.log(`[Server Load /tasks] Loading tasks for user: ${userId}`);
-
-    const filterFromDate = url.searchParams.get('filterFromDate');
-    const filterToDate = url.searchParams.get('filterToDate');
-
-    console.log(`[Server Load /tasks] URL params: filterFromDate=${filterFromDate}, filterToDate=${filterToDate}`);
 
     try {
-        const tasksCollectionRef = adminDb.collection('tasks');
-        let firestoreQuery = tasksCollectionRef.where('userId', '==', userId);
-        console.log(`[Server Load /tasks] Fetching all tasks for user ${userId}. Date range filter (if any) will be applied client-side.`);
-
+        const firestoreQuery = tasksCollection.where('userId', '==', userId);
         const snapshot = await firestoreQuery.get();
-        console.log(`[Server Load /tasks] Fetched ${snapshot.docs.length} total tasks for user.`);
-        let allTasks: TaskForFrontend[] = snapshot.docs.map(mapTaskData);
+        let allTasks: TaskForFrontend[] = snapshot.docs.map(doc => mapFetchedTaskToFrontend(doc));
 
         allTasks.sort((a, b) => {
             const statusOrder = { 'pending': 1, 'incomplete': 2, 'late': 3, 'complete': 4 };
@@ -199,12 +187,11 @@ export const load: PageServerLoad = async ({ locals, url }: PageServerLoadEvent)
                 return statusOrder[a.status] - statusOrder[b.status];
             }
             if (a.status === 'pending' || a.status === 'incomplete') {
-                const dateA = a.dueDateISO ? new Date(a.dueDateISO).getTime() : Infinity;
-                const dateB = b.dueDateISO ? new Date(b.dueDateISO).getTime() : Infinity;
-                if (dateA !== dateB) return dateA - dateB;
+                const dateAVal = a.dueDateISO ? new Date(a.dueDateISO).getTime() : Infinity;
+                const dateBVal = b.dueDateISO ? new Date(b.dueDateISO).getTime() : Infinity;
+                if (dateAVal !== dateBVal) return dateAVal - dateBVal;
                 if (a.dueTime && b.dueTime) return a.dueTime.localeCompare(b.dueTime);
-                else if (a.dueTime) return -1;
-                else if (b.dueTime) return 1;
+                else if (a.dueTime) return -1; else if (b.dueTime) return 1;
             }
             const createdAtA = a.createdAtISO ? new Date(a.createdAtISO).getTime() : 0;
             const createdAtB = b.createdAtISO ? new Date(b.createdAtISO).getTime() : 0;
@@ -213,25 +200,17 @@ export const load: PageServerLoad = async ({ locals, url }: PageServerLoadEvent)
 
         return {
             user: userForFrontend,
+            workspaces: workspacesForFrontend,
             tasks: allTasks,
             filterFromDate,
             filterToDate
         };
 
     } catch (error: any) {
-        console.error('[Server Load /tasks] ERROR loading tasks:', error);
-        if (error.code === 'FAILED_PRECONDITION' && error.message.includes('index')) {
-             console.error("[Server Load /tasks] Query failed due to a missing Firestore index. Check Firestore console for index suggestions based on: userId, dueDate (and potentially other orderBy fields if added to the query).");
-             return {
-                user: userForFrontend,
-                tasks: [],
-                error: `Query failed: Missing Firestore index. See server logs and Firebase console.`,
-                filterFromDate,
-                filterToDate
-            };
-         }
+        console.error(`[Server Load /kanban] ERROR loading tasks:`, error);
         return {
             user: userForFrontend,
+            workspaces: workspacesForFrontend,
             tasks: [],
             error: `Failed to load tasks: ${error.message || 'Server Error'}.`,
             filterFromDate,
@@ -240,12 +219,19 @@ export const load: PageServerLoad = async ({ locals, url }: PageServerLoadEvent)
     }
 };
 
+// Define a type for task data when creating a new task, making FieldValue usage explicit
+// This matches FetchedTaskData structure but with FieldValue for server-generated timestamps.
+type TaskDataForCreate = Omit<FetchedTaskData, 'createdAt' | 'lastModified' | 'completedAt'> & {
+    createdAt: FieldValue;
+    lastModified: FieldValue;
+    // completedAt is not set on creation
+};
+
+
 export const actions: Actions = {
     addTask: async ({ request, locals }) => {
         const userId = locals.userId;
-        if (!userId) {
-            return fail(401, { taskForm: { error: 'User not authenticated.' } });
-        }
+        if (!userId) return fail(401, { taskForm: { error: 'User not authenticated.' } });
 
         const formData = await request.formData();
         const title = formData.get('title')?.toString()?.trim();
@@ -255,156 +241,182 @@ export const actions: Actions = {
         const priority = formData.get('priority')?.toString() || 'standard';
         const tagsString = formData.get('tags')?.toString()?.trim() || '';
         const tags = tagsString ? tagsString.split(',').map(tag => tag.trim()).filter(Boolean) : [];
+        let boardId = formData.get('boardId')?.toString() || 'unassigned_tasks_board';
 
         if (!title) {
-            return fail(400, {
-                taskForm: {
-                    error: 'Task title is required.',
-                    title, description, dueDate, dueTime, priority, tags: tagsString
-                }
-            });
+            return fail(400, { taskForm: { error: 'Task title is required.', title, description, dueDate, dueTime, priority, tags: tagsString, boardId } });
         }
-
-        const taskData: any = {
-            userId,
-            title,
-            description,
-            priority,
-            tags,
-            isCompleted: false,
+        
+        // Use the specific type for creation
+        const taskData: TaskDataForCreate = {
+            userId, boardId, title, description, priority, tags, isCompleted: false,
             createdAt: FieldValue.serverTimestamp(),
-            lastModified: FieldValue.serverTimestamp()
+            lastModified: FieldValue.serverTimestamp(),
+            // These will be explicitly set below
+            dueDate: null, 
+            dueTime: null,
         };
-
-        if (dueDate === '') {
+        
+        if (dueDate === '' || dueDate === null) {
             taskData.dueDate = null;
-        } else if (dueDate && dueDate.match(/^\d{4}-\d{2}-\d{2}$/)) {
-            taskData.dueDate = dueDate;
-        } else if (dueDate) {
-            return fail(400, {
-                taskForm: {
-                    error: 'Invalid due date format. Use YYYY-MM-DD.',
-                    title, description, dueDate, dueTime, priority, tags: tagsString
-                }
-            });
-        }
-
-        if (dueTime === '') {
             taskData.dueTime = null;
-        } else if (dueTime && dueTime.match(/^\d{2}:\d{2}$/)) {
+        } else if (dueDate.match(/^\d{4}-\d{2}-\d{2}$/)) {
+            taskData.dueDate = dueDate;
+        } else {
+            return fail(400, { taskForm: { error: 'Invalid due date format. Use YYYY-MM-DD.', title, description, dueDate, dueTime, priority, tags: tagsString, boardId }});
+        }
+        
+        if (dueTime === '' || dueTime === null || !taskData.dueDate) {
+            taskData.dueTime = null;
+        } else if (dueTime.match(/^\d{2}:\d{2}$/)) {
             taskData.dueTime = dueTime;
-        } else if (dueTime) {
-            return fail(400, {
-                taskForm: {
-                    error: 'Invalid due time format. Use HH:MM.',
-                    title, description, dueDate, dueTime, priority, tags: tagsString
-                }
-            });
+        } else {
+            return fail(400, { taskForm: { error: 'Invalid due time format. Use HH:MM.', title, description, dueDate, dueTime, priority, tags: tagsString, boardId }});
         }
 
         try {
-            const newTaskDocRef = await adminDb.collection('tasks').add(taskData);
-            return {
-                taskForm: {
-                    success: true,
-                    id: newTaskDocRef.id,
-                    message: 'Task added successfully!'
-                }
-            };
+            // tasksCollection is already typed
+            const newTaskDocRef = await tasksCollection.add(taskData);
+            return { taskForm: { success: true, id: newTaskDocRef.id, message: 'Task added successfully!' } };
         } catch (error: any) {
-            console.error('[Action addTask] ERROR:', error);
-            return fail(500, {
-                taskForm: {
-                    error: `Failed to add task: ${error.message}`,
-                    title, description, dueDate, dueTime, priority, tags: tagsString
-                }
-            });
+            console.error(`[Action addTask /kanban] ERROR:`, error);
+            return fail(500, { taskForm: { error: `Failed to add task: ${error.message}`, title, description, dueDate, dueTime, priority, tags: tagsString, boardId } });
         }
     },
 
     updateTask: async ({ request, locals }) => {
         const userId = locals.userId;
         if (!userId) return fail(401, { taskForm: { error: 'User not authenticated.' } });
-
         const formData = await request.formData();
         const taskId = formData.get('taskId')?.toString();
         if (!taskId) return fail(400, { taskForm: { error: 'Task ID is required.' } });
 
         const title = formData.get('title')?.toString()?.trim();
-        const description = formData.get('description')?.toString()?.trim() || '';
+        const description = formData.get('description')?.toString()?.trim(); // Keep undefined if not provided for partial update
+        const priority = formData.get('priority')?.toString();
         const dueDate = formData.get('dueDate')?.toString();
         const dueTime = formData.get('dueTime')?.toString();
-        const priority = formData.get('priority')?.toString() || 'standard';
 
-        if (!title) return fail(400, { taskForm: { error: 'Task title is required.', taskId } });
+        if (!title && title !== undefined) { // Check if title is explicitly empty, not just missing
+             return fail(400, { taskForm: { error: 'Task title is required.', taskId } });
+        }
+        
+        // Type for update payload, ensuring lastModified is FieldValue
+        // Other fields are optional and match FetchedTaskData structure.
+        type TaskUpdatePayload = Partial<Omit<FetchedTaskData, 'lastModified'>> & {
+            lastModified: FieldValue;
+        };
 
-        const taskUpdateData: any = { title, description, priority, lastModified: FieldValue.serverTimestamp() };
+        const taskUpdateData: TaskUpdatePayload = { 
+            lastModified: FieldValue.serverTimestamp() 
+        };
 
-        if (dueDate === null || dueDate === '') taskUpdateData.dueDate = null;
-        else if (dueDate && dueDate.match(/^\d{4}-\d{2}-\d{2}$/)) taskUpdateData.dueDate = dueDate;
-        else if (dueDate) return fail(400, { taskForm: { error: 'Invalid due date format.', taskId } });
+        if (title !== undefined) taskUpdateData.title = title;
+        if (description !== undefined) taskUpdateData.description = description;
+        if (priority !== undefined) taskUpdateData.priority = priority;
 
-        if (dueTime === null || dueTime === '') taskUpdateData.dueTime = null;
-        else if (dueTime && dueTime.match(/^\d{2}:\d{2}$/)) taskUpdateData.dueTime = dueTime;
-        else if (dueTime) return fail(400, { taskForm: { error: 'Invalid due time format.', taskId } });
+        if (dueDate === null || dueDate === '' || dueDate === undefined) {
+            taskUpdateData.dueDate = null;
+            taskUpdateData.dueTime = null; 
+        } else if (dueDate.match(/^\d{4}-\d{2}-\d{2}$/)) {
+            taskUpdateData.dueDate = dueDate;
+        } else if (dueDate !== undefined) { // only fail if dueDate was provided and invalid
+            return fail(400, { taskForm: { error: 'Invalid due date format.', taskId } });
+        }
 
+        if (dueTime === null || dueTime === '' || dueTime === undefined || taskUpdateData.dueDate === null) {
+            // If dueDate is being set to null, dueTime should also be null even if not explicitly passed as empty
+            if (taskUpdateData.dueDate === null && dueTime !== undefined) { // if dueTime was provided but dueDate is now null
+                 taskUpdateData.dueTime = null;
+            } else if (dueTime !== undefined) { // only update if dueTime was actually passed
+                taskUpdateData.dueTime = null;
+            }
+        } else if (dueTime.match(/^\d{2}:\d{2}$/)) {
+            taskUpdateData.dueTime = dueTime;
+        } else if (dueTime !== undefined) { // only fail if dueTime was provided and invalid
+            return fail(400, { taskForm: { error: 'Invalid due time format.', taskId } });
+        }
+        
         try {
-            const taskRef = adminDb.collection('tasks').doc(taskId);
+            const taskRef = tasksCollection.doc(taskId); // taskRef is DocumentReference<FetchedTaskData>
             const taskDoc = await taskRef.get();
             if (!taskDoc.exists) return fail(404, { taskForm: { error: 'Task not found.' } });
             if (taskDoc.data()?.userId !== userId) return fail(403, { taskForm: { error: 'Permission denied.' } });
-
+            
             await taskRef.update(taskUpdateData);
             return { taskForm: { success: true, message: 'Task updated successfully!' } };
         } catch (error: any) {
-            console.error(`[Action updateTask] ERROR for task ${taskId}:`, error);
+            console.error(`[Action updateTask /kanban] ERROR for task ${taskId}:`, error);
             return fail(500, { taskForm: { error: `Failed to update task: ${error.message}` } });
+        }
+    },
+    
+    updateTaskDueDate: async ({ request, locals }) => {
+        const userId = locals.userId;
+        if (!userId) return fail(401, { updateDueDateForm: { error: 'User not authenticated.' } });
+        
+        const formData = await request.formData();
+        const taskId = formData.get('taskId')?.toString();
+        const newDueDateISO = formData.get('newDueDateISO')?.toString(); 
+
+        if (!taskId) return fail(400, { updateDueDateForm: { error: 'Task ID is required.' }});
+        if (newDueDateISO === undefined) return fail(400, { updateDueDateForm: { error: 'New due date is required.' }});
+
+        const updatePayload: Partial<Pick<FetchedTaskData, 'dueDate' | 'dueTime'>> & { lastModified: FieldValue } = {
+            lastModified: FieldValue.serverTimestamp()
+        };
+
+        if (newDueDateISO === '' || newDueDateISO === null) {
+            updatePayload.dueDate = null;
+            updatePayload.dueTime = null; 
+        } else if (newDueDateISO.match(/^\d{4}-\d{2}-\d{2}$/)) {
+            updatePayload.dueDate = newDueDateISO;
+            // Note: If newDueDateISO is set, existing dueTime persists unless explicitly cleared.
+            // If you want to clear dueTime when only date is changed, add logic here or expect client to send it.
+        } else {
+            return fail(400, { updateDueDateForm: { error: 'Invalid new due date format.' }});
+        }
+        
+        try {
+            const taskRef = tasksCollection.doc(taskId);
+            const taskDoc = await taskRef.get();
+            if (!taskDoc.exists) return fail(404, { updateDueDateForm: { error: 'Task not found.' }});
+            if (taskDoc.data()?.userId !== userId) return fail(403, { updateDueDateForm: { error: 'Permission denied.' }});
+            
+            await taskRef.update(updatePayload);
+            return { updateDueDateForm: { success: true, message: 'Task due date updated successfully.' }};
+        } catch (error: any) {
+            console.error(`[Action updateTaskDueDate /kanban] ERROR for task ${taskId} to ${newDueDateISO}:`, error);
+            return fail(500, { updateDueDateForm: { error: `Failed to update task due date: ${error.message}` }});
         }
     },
 
     toggleComplete: async ({ request, locals }) => {
         const userId = locals.userId;
         if (!userId) return fail(401, { toggleCompleteForm: { error: 'User not authenticated.' } });
-
         const formData = await request.formData();
         const taskId = formData.get('taskId')?.toString();
         const currentIsCompleted = formData.get('isCompleted')?.toString() === 'true';
-
-        if (!taskId) {
-            return fail(400, { toggleCompleteForm: { error: 'Task ID is required.' } });
-        }
+        if (!taskId) return fail(400, { toggleCompleteForm: { error: 'Task ID is required.' } });
 
         try {
-            const taskRef = adminDb.collection('tasks').doc(taskId);
+            const taskRef = tasksCollection.doc(taskId);
             const taskDoc = await taskRef.get();
-            const taskData = taskDoc.data() as FetchedTaskData | undefined;
-
-            if (!taskData) return fail(404, { toggleCompleteForm: { error: 'Task not found.' } });
-            if (taskData.userId !== userId) return fail(403, { toggleCompleteForm: { error: 'Permission denied.' } });
+            const taskDataFromDb = taskDoc.data(); // Already FetchedTaskData
+            if (!taskDataFromDb) return fail(404, { toggleCompleteForm: { error: 'Task not found.' } });
+            if (taskDataFromDb.userId !== userId) return fail(403, { toggleCompleteForm: { error: 'Permission denied.' } });
 
             const newCompletedState = !currentIsCompleted;
-            const updatePayload: { isCompleted: boolean; lastModified: FieldValue; completedAt?: FieldValue | Timestamp | null } = {
+            // Explicit type for payload ensuring FieldValue usage
+            const updatePayload: { isCompleted: boolean; lastModified: FieldValue; completedAt: FieldValue | null } = {
                 isCompleted: newCompletedState,
-                lastModified: FieldValue.serverTimestamp()
+                lastModified: FieldValue.serverTimestamp(),
+                completedAt: newCompletedState ? FieldValue.serverTimestamp() : null
             };
-
-            if (newCompletedState) {
-                updatePayload.completedAt = FieldValue.serverTimestamp();
-            } else {
-                updatePayload.completedAt = null;
-            }
-
             await taskRef.update(updatePayload);
-
-            return {
-                toggleCompleteForm: {
-                    successMessage: `Task ${newCompletedState ? 'marked as complete' : 'marked as not complete'}.`,
-                    taskId: taskId,
-                    newCompletedState: newCompletedState
-                }
-            };
+            return { toggleCompleteForm: { successMessage: `Task ${newCompletedState ? 'marked complete' : 'marked incomplete'}.`, taskId, newCompletedState } };
         } catch (error: any) {
-            console.error(`[Action toggleComplete] ERROR for task ${taskId}:`, error);
+            console.error(`[Action toggleComplete /kanban] ERROR for task ${taskId}:`, error);
             return fail(500, { toggleCompleteForm: { error: `Failed to update completion: ${error.message}` } });
         }
     },
@@ -415,16 +427,15 @@ export const actions: Actions = {
         const formData = await request.formData();
         const taskId = formData.get('taskId') as string;
         if (!taskId) return fail(400, { deleteTaskForm: { error: 'Task ID is required.' } });
-
         try {
-            const taskRef = adminDb.collection('tasks').doc(taskId);
+            const taskRef = tasksCollection.doc(taskId);
             const taskDoc = await taskRef.get();
             if (!taskDoc.exists) return fail(404, { deleteTaskForm: { error: 'Task not found.' } });
             if (taskDoc.data()?.userId !== userId) return fail(403, { deleteTaskForm: { error: 'Permission denied.' } });
             await taskRef.delete();
             return { deleteTaskForm: { successMessage: 'Task deleted successfully.' } };
         } catch (error: any) {
-            console.error(`[Action deleteTask] ERROR for task ${taskId}:`, error);
+            console.error(`[Action deleteTask /kanban] ERROR for task ${taskId}:`, error);
             return fail(500, { deleteTaskForm: { error: `Failed to delete task: ${error.message}` } });
         }
     },
@@ -437,13 +448,11 @@ export const actions: Actions = {
         if (!taskIdsString) return fail(400, { batchDeleteForm: { error: 'Task IDs are required.' } });
         const taskIds = taskIdsString.split(',').map(id => id.trim()).filter(Boolean);
         if (taskIds.length === 0) return fail(400, { batchDeleteForm: { error: 'No valid task IDs.' } });
-
         try {
             const batch = adminDb.batch();
-            const tasksCollectionRef = adminDb.collection('tasks');
             let deletedCount = 0;
             for (const taskId of taskIds) {
-                const taskRef = tasksCollectionRef.doc(taskId);
+                const taskRef = tasksCollection.doc(taskId); // DocumentReference<FetchedTaskData>
                 const taskDoc = await taskRef.get();
                 if (taskDoc.exists && taskDoc.data()?.userId === userId) {
                     batch.delete(taskRef);
@@ -453,7 +462,7 @@ export const actions: Actions = {
             if (deletedCount > 0) await batch.commit();
             return { batchDeleteForm: { successMessage: `${deletedCount} task(s) deleted. ${taskIds.length - deletedCount} skipped.` } };
         } catch (error: any) {
-            console.error(`[Action batchDeleteTasks] ERROR:`, error);
+            console.error(`[Action batchDeleteTasks /kanban] ERROR:`, error);
             return fail(500, { batchDeleteForm: { error: `Failed to batch delete: ${error.message}` } });
         }
     },

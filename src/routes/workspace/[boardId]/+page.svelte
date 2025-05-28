@@ -5,157 +5,333 @@
     import { fly } from 'svelte/transition';
     import { quintOut } from 'svelte/easing';
     import { enhance } from '$app/forms';
+    import type { SubmitFunction, ActionResult } from '@sveltejs/kit';
+    import { invalidateAll } from '$app/navigation';
+    import TaskDetailModal from '$lib/components/TaskDetailModal.svelte';
+    import LoadingIndicator from '$lib/components/LoadingIndicator.svelte';
+    import type { TaskForFrontend } from '$lib/types/task';
 
-    export let data: import('./$types').PageData; // PageData will use the WorkspaceForFrontend interface
+    export let data: import('./$types').PageData;
+
+    let isLoadingOperation = false; // New state for loading indicator
 
     // --- KANBAN INTERFACES ---
     interface PlaceholderTask {
         id: string;
         title: string;
-        description?: string;
-        priority?: 'high' | 'medium' | 'low' | 'standard' | string;
-        dueDateISO?: string | null;
-        dueTime?: string | null;
+        description: string;
+        isCompleted: boolean;
+        status: 'pending' | 'complete' | 'incomplete' | 'late';
+        priority: string | number | null;
+        createdAtISO: string | null;
+        dueDateISO: string | null;
+        dueTime: string | null;
         boardId: string;
+        color?: string;
     }
-    interface PlaceholderColumn { // Represents a Workspace/Board
-        id: string; // This is the boardId (from WorkspaceForFrontend.id on server)
-        title: string; // This is the WorkspaceForFrontend.name
+    interface PlaceholderColumn {
+        id: string; // dueDateISO ('YYYY-MM-DD') or NO_DUE_DATE_COLUMN_ID
+        title: string; // User-friendly date string (e.g., "Today", "No Due Date")
         tasks: PlaceholderTask[];
-        // createdAtISO?: string | null; // If you need to use this on the client from data.workspaces
     }
+    export const NO_DUE_DATE_COLUMN_ID = '___NO_DUE_DATE___';
     // --- END KANBAN INTERFACES ---
 
     // --- LOCALSTORAGE STATE ---
     interface KanbanLayoutStorage {
-        columnOrder: string[]; // Array of boardIds
-        taskOrders: Record<string, string[]>; // Key is boardId, value is array of taskIds
+        columnOrder: string[]; // Array of dateKeys (dueDateISO or NO_DUE_DATE_COLUMN_ID) - less critical if always date-sorted
+        taskOrders: Record<string, string[]>; // Key is dateKey, value is array of taskIds
     }
-    let savedLayout: KanbanLayoutStorage | null = null;
-    const KANBAN_STORAGE_KEY = 'kanbanBoardLayout_v2';
+    export let savedLayout: KanbanLayoutStorage | null = null;
+    export const KANBAN_STORAGE_KEY = 'kanbanBoardLayout_v2_date_based'; // Changed key to avoid conflicts
 
     // --- HEADER/SIDEBAR UI STATE ---
-	let isSidebarOpen = false;
-	let isDarkMode = false;
-    const dropdownIds = ['notifWindow', 'helpWindow', 'profileWindow'];
-    let usernameForDisplay: string;
+	export let isSidebarOpen = false;
+	export let isDarkMode = false;
+    export const dropdownIds = ['notifWindow', 'helpWindow', 'profileWindow'];
+    export let usernameForDisplay: string;
     // --- END Header/Sidebar UI State ---
 
-    // --- KANBAN DRAG & DROP STATE ---
-    let draggedColumnItem: PlaceholderColumn | null = null;
-    let activeDraggedColumnElement: HTMLElement | null = null;
-    let columnDragOverIndex: number | null = null;
-    let columnDragOffsetX = 0, columnDragOffsetY = 0;
-    let currentColumnX = 0, currentColumnY = 0, targetColumnX = 0, targetColumnY = 0;
-    let velocityX = 0, velocityY = 0;
-    let currentRotation = 0, targetRotation = 0, rotationVelocity = 0;
-    let currentSkewX = 0, targetSkewX = 0, skewXVelocity = 0;
-    let columnAnimationFrameId: number | null = null;
+    // --- KANBAN CARD DRAG & DROP STATE (COLUMN DRAG STATE IS REMOVED) ---
+    export let draggedCardItem: { task: PlaceholderTask; fromColumnId: string } | null = null; // fromColumnId is the original dateKey
+    export let currentCardDragOverInfo: { columnId: string; overTaskId?: string; position?: 'before' | 'after' } | null = null; // columnId is the target dateKey
+    export let activeDraggedCardElement: HTMLElement | null = null;
+    export let cardDragOffsetX = 0, cardDragOffsetY = 0;
+    export let currentCardX = 0, currentCardY = 0, targetCardX = 0, targetCardY = 0;
+    export let cardVelocityX = 0, cardVelocityY = 0;
+    export let cardAnimationFrameId: number | null = null;
 
-    let draggedCardItem: { task: PlaceholderTask; fromColumnId: string } | null = null;
-    let currentCardDragOverInfo: { columnId: string; overTaskId?: string; position?: 'before' | 'after' } | null = null;
-    let activeDraggedCardElement: HTMLElement | null = null;
-    let cardDragOffsetX = 0, cardDragOffsetY = 0;
-    let currentCardX = 0, currentCardY = 0, targetCardX = 0, targetCardY = 0;
-    let cardVelocityX = 0, cardVelocityY = 0;
-    let cardAnimationFrameId: number | null = null;
+    export const POS_SPRING_STIFFNESS = 0.09;
+    export const POS_DAMPING_FACTOR = 0.70;
+    export let DUMMY_DRAG_IMAGE: HTMLImageElement;
+    // --- END KANBAN CARD DRAG & DROP STATE ---
 
-    const POS_SPRING_STIFFNESS = 0.09;
-    const POS_DAMPING_FACTOR = 0.70;
-    const DEFORM_SPRING_STIFFNESS = 0.1;
-    const DEFORM_DAMPING_FACTOR = 0.65;
-    const MAX_SKEW_X = 15;
-    const MAX_ROTATION = 10;
-    let DUMMY_DRAG_IMAGE: HTMLImageElement;
-    // --- END KANBAN DRAG & DROP STATE ---
+    // --- MODAL STATE ---
+    export let isConfirmationModalOpen = false;
+    export let confirmationModalMessage = '';
+    export let resolveConfirmationPromise: ((confirmed: boolean) => void) | null = null;
 
-    let boardColumns: PlaceholderColumn[] = [];
+    export let isTaskDetailModalOpen = false;
+    export let selectedTaskForModal: PlaceholderTask | null = null;
+
+    export let isAddTaskModalOpen = false;
+    export let addTaskTargetColumnId: string | null = null;
+    export let addTaskFormError: string | null = null;
+    export let addTaskFormSubmitting = false;
+
+    // Form field values for Add Task Modal
+    export let newTaskTitle = '';
+    export let newTaskDueDate = '';
+    export let newTaskDueTime = '';
+    export let newTaskDescription = '';
+    export let newTaskPriority = 'standard'; // Default priority
+
+    export let boardColumns: PlaceholderColumn[] = [];
+    export let allTasksFlatList: PlaceholderTask[] = []; // Keep a flat list for easier lookup
+
+    export const PHILIPPINES_TIMEZONE_OFFSET_HOURS_CLIENT = 8; // Assuming this is still relevant for date calculations
+
+    export async function showCustomConfirm(message: string): Promise<boolean> {
+        return new Promise((resolve) => {
+            confirmationModalMessage = message;
+            isConfirmationModalOpen = true;
+            resolveConfirmationPromise = resolve; // Store the resolve function
+        });
+    }
+
+    let modalEscListener: ((event: KeyboardEvent) => void) | null = null;
+    $: if (browser && isConfirmationModalOpen && !modalEscListener) {
+        modalEscListener = (event: KeyboardEvent) => {
+            if (event.key === 'Escape') {
+                handleModalCancel();
+            }
+        };
+        document.addEventListener('keydown', modalEscListener);
+    } else if (browser && !isConfirmationModalOpen && modalEscListener) {
+        document.removeEventListener('keydown', modalEscListener);
+        modalEscListener = null;
+    }
+
+    function handleModalConfirm() {
+        if (resolveConfirmationPromise) {
+            resolveConfirmationPromise(true);
+        }
+        closeModal();
+    }
+
+    function handleModalCancel() {
+        if (resolveConfirmationPromise) {
+            resolveConfirmationPromise(false);
+        }
+        closeModal();
+    }
+
+    function closeModal() {
+        isConfirmationModalOpen = false;
+        confirmationModalMessage = '';
+        resolveConfirmationPromise = null;
+    }
+
+    function openTaskDetailModal(task: PlaceholderTask) {
+        // Find the full task details from allTasksFlatList if PlaceholderTask is different
+        const fullTask = allTasksFlatList.find(t => t.id === task.id);
+        if (fullTask) {
+            selectedTaskForModal = fullTask;
+            isTaskDetailModalOpen = true;
+        } else {
+            console.error("Full task details not found for modal display.");
+        }
+    }
+
+    function openAddTaskModal(columnId: string) {
+        addTaskTargetColumnId = columnId;
+        // Reset form fields
+        newTaskTitle = '';
+        newTaskDueDate = ''; // Consider pre-filling with today's date
+        newTaskDueTime = ''; // Consider pre-filling
+        newTaskDescription = '';
+        newTaskPriority = 'standard'; // Default priority
+        addTaskFormError = null;
+        isAddTaskModalOpen = true;
+    }
+
+    function closeAddTaskModal() {
+        isAddTaskModalOpen = false;
+        addTaskTargetColumnId = null;
+        addTaskFormError = null;
+        addTaskFormSubmitting = false;
+    }
+
+    const handleAddTaskEnhance: SubmitFunction = ({ formData, action, cancel }) => {
+        addTaskFormSubmitting = true;
+        addTaskFormError = null;
+        isLoadingOperation = true; // Start loading for add task
+
+        // Client-side validation (can be more extensive)
+        if (!formData.get('title') || !formData.get('dueDate') || !formData.get('dueTime')) {
+            addTaskFormError = "Task Name, Due Date, and Due Time are required.";
+            addTaskFormSubmitting = false;
+            isLoadingOperation = false; // End loading on client-side validation failure
+            cancel(); // Prevent SvelteKit form submission
+            return;
+        }
+
+        // Add boardId from the current route parameter
+        const boardId = $page.params.boardId;
+        if (boardId) {
+            formData.append('boardId', boardId);
+        } else {
+            addTaskFormError = "Board ID is missing. Cannot add task.";
+            addTaskFormSubmitting = false;
+            isLoadingOperation = false; // End loading if boardId is missing
+            cancel();
+            return;
+        }
+
+        return async ({ result, update }: { result: ActionResult, update: () => Promise<void> }) => {
+            addTaskFormSubmitting = false;
+            isLoadingOperation = false; // End loading after server response
+
+            if (result.type === 'failure') {
+                if (result.data?.taskForm?.error) {
+                    addTaskFormError = result.data.taskForm.error;
+                } else {
+                    addTaskFormError = 'An unknown error occurred.';
+                }
+            } else if (result.type === 'success') {
+                closeAddTaskModal();
+                await invalidateAll(); // Refresh tasks
+            }
+            await update(); // This will re-run the `load` function.
+        };
+    };
+
+    function getPreciseDueDateInTimezoneAsUTC_Client(
+        dateString: string | null | undefined,
+        timeString: string | null | undefined,
+        targetTimezoneOffsetHours: number
+    ): Date | null {
+        if (!dateString || !/\d{4}-\d{2}-\d{2}/.test(dateString)) return null;
+        try {
+            const [year, month, day] = dateString.split('-').map(Number);
+            let h = 23, m = 59, s = 59, ms = 999;
+            if (timeString && /\d{2}:\d{2}/.test(timeString)) {
+                const parsedTime = timeString.split(':').map(Number);
+                if (!isNaN(parsedTime[0]) && !isNaN(parsedTime[1])) {
+                    h = parsedTime[0];
+                    m = parsedTime[1];
+                    s = 0; ms = 0;
+                }
+            }
+            return new Date(Date.UTC(year, month - 1, day, h - targetTimezoneOffsetHours, m, s, ms));
+        } catch (e) { return null; }
+    }
+
+    function recalculateTaskStatusClientSide(task: {
+        isCompleted?: boolean, // Make optional as it might not be present in workspace tasks initially
+        dueDateISO?: string | null,
+        dueTime?: string | null
+    }): TaskForFrontend['status'] {
+        const now = new Date();
+        const preciseDueDateDeadlineUTC = getPreciseDueDateInTimezoneAsUTC_Client(
+            task.dueDateISO ?? null,
+            task.dueTime ?? null,
+            PHILIPPINES_TIMEZONE_OFFSET_HOURS_CLIENT
+        );
+
+        // If isCompleted is explicitly true, it's complete. Otherwise, check due date.
+        if (task.isCompleted) {
+            return (preciseDueDateDeadlineUTC && now.getTime() > preciseDueDateDeadlineUTC.getTime()) ? 'late' : 'complete';
+        } else {
+            return (preciseDueDateDeadlineUTC && now.getTime() > preciseDueDateDeadlineUTC.getTime()) ? 'incomplete' : 'pending';
+        }
+    }
 
     function mapRawTaskToPlaceholder(rawTask: typeof data.tasks[0]): PlaceholderTask {
-        return {
+        const mappedTask: PlaceholderTask = {
             id: rawTask.id,
             title: rawTask.title,
-            description: rawTask.description || undefined,
+            description: rawTask.description || '', // Ensure description is always a string
             priority: mapPriorityToKanban(rawTask.priority),
-            dueDateISO: rawTask.dueDateISO,
+            dueDateISO: rawTask.dueDateISO, // This is 'YYYY-MM-DD' or null
             dueTime: rawTask.dueTime,
-            boardId: rawTask.boardId
+            boardId: rawTask.boardId, // Underlying board/project ID
+            createdAtISO: rawTask.createdAtISO || null, // Map createdAtISO, default to null
+            isCompleted: rawTask.isCompleted ?? false, // Default to false if not present
+            status: 'pending' // Default status, will be recalculated
         };
+        // Recalculate status based on the task's properties
+        mappedTask.status = recalculateTaskStatusClientSide(mappedTask);
+        return mappedTask;
+    }
+
+    function formatDateForColumnTitle(dateKey: string): string {
+        if (dateKey === NO_DUE_DATE_COLUMN_ID) {
+            return "No Due Date";
+        }
+        try {
+            const [year, month, day] = dateKey.split('-').map(Number);
+            const columnDate = new Date(year, month - 1, day); 
+
+            const today = new Date(); today.setHours(0, 0, 0, 0);
+            const tomorrow = new Date(today); tomorrow.setDate(today.getDate() + 1);
+
+            if (columnDate.getTime() === today.getTime()) return "Today";
+            if (columnDate.getTime() === tomorrow.getTime()) return "Tomorrow";
+
+            return columnDate.toLocaleDateString(undefined, {
+                weekday: 'short', month: 'short', day: 'numeric'
+            });
+        } catch (e) {
+            console.warn("Error formatting date for column title:", dateKey, e);
+            return dateKey;
+        }
     }
 
     $: {
+        console.log('Value of data.user:', data.user); // Added for debugging
         usernameForDisplay = data.user?.name || 'User';
 
-        if (!data.workspaces || data.workspaces.length === 0) {
-            boardColumns = [];
-        } else {
-            let orderedWorkspaceIds: string[];
-            const allWorkspaceIdsFromData = data.workspaces.map(ws => ws.id);
-
-            if (savedLayout && savedLayout.columnOrder && savedLayout.columnOrder.length > 0) {
-                orderedWorkspaceIds = savedLayout.columnOrder.filter(id => allWorkspaceIdsFromData.includes(id));
-                allWorkspaceIdsFromData.forEach(id => {
-                    if (!orderedWorkspaceIds.includes(id)) {
-                        orderedWorkspaceIds.push(id);
-                    }
-                });
-            } else {
-                orderedWorkspaceIds = [...allWorkspaceIdsFromData];
-            }
-
-            const workspaceMap = new Map(data.workspaces.map(ws => [ws.id, ws]));
-            const tempBoardColumns = orderedWorkspaceIds.map(boardId => {
-                const workspace = workspaceMap.get(boardId);
-                if (!workspace) {
-                    console.warn(`CRITICAL (Svelte): Workspace with ID ${boardId} was in orderedWorkspaceIds but NOT FOUND in workspaceMap. This column will be skipped.`);
-                    return null;
-                }
-                return {
-                    id: boardId,
-                    title: workspace.name, // This uses the name from data.workspaces
-                    tasks: [] as PlaceholderTask[],
-                };
-            }).filter(Boolean) as PlaceholderColumn[];
-
-            const columnsMapById = new Map(tempBoardColumns.map(col => [col.id, col]));
-            const serverDefaultBoardId = data.workspaces.length > 0 ? data.workspaces[0].id : null;
+        if (data.tasks) {
+            const tasksByDateGroup = new Map<string, PlaceholderTask[]>();
 
             (data.tasks || []).forEach(rawTask => {
                 const task = mapRawTaskToPlaceholder(rawTask);
-                let targetColumn = columnsMapById.get(task.boardId);
+                const dateKey = task.dueDateISO || NO_DUE_DATE_COLUMN_ID;
 
-                if (!targetColumn) {
-                    if (serverDefaultBoardId) {
-                        targetColumn = columnsMapById.get(serverDefaultBoardId);
-                    }
-                    if (targetColumn) {
-                        task.boardId = targetColumn.id;
-                    } else if (tempBoardColumns.length > 0) {
-                        targetColumn = tempBoardColumns[0];
-                        task.boardId = targetColumn.id;
-                    }
+                if (!tasksByDateGroup.has(dateKey)) {
+                    tasksByDateGroup.set(dateKey, []);
                 }
-                
-                if (targetColumn) {
-                    if (!targetColumn.tasks.some(t => t.id === task.id)) {
-                        targetColumn.tasks.push(task);
-                    }
-                } else {
-                     console.error(`Task ${task.id} could not be placed. No target column found and no fallbacks available.`);
+                const groupTasks = tasksByDateGroup.get(dateKey)!;
+                if (!groupTasks.some(t => t.id === task.id)) { 
+                    groupTasks.push(task);
                 }
             });
 
+            let tempBoardColumns = Array.from(tasksByDateGroup.entries()).map(([dateKey, tasks]) => ({
+                id: dateKey, 
+                title: formatDateForColumnTitle(dateKey),
+                tasks: tasks,
+            }));
+
+            tempBoardColumns.sort((a, b) => {
+                if (a.id === NO_DUE_DATE_COLUMN_ID) return -1;
+                if (b.id === NO_DUE_DATE_COLUMN_ID) return 1;
+                return a.id.localeCompare(b.id);
+            });
+            
             if (savedLayout && savedLayout.taskOrders) {
                 const taskOrdersFromStorage = savedLayout.taskOrders;
                 tempBoardColumns.forEach(column => {
-                    const orderedTaskIdsForColumn = taskOrdersFromStorage[column.id];
+                    const orderedTaskIdsForColumn = taskOrdersFromStorage[column.id]; 
                     if (orderedTaskIdsForColumn && orderedTaskIdsForColumn.length > 0) {
                         const taskMapInColumn = new Map(column.tasks.map(t => [t.id, t]));
                         const sortedTasks: PlaceholderTask[] = [];
+                        
                         orderedTaskIdsForColumn.forEach(taskId => {
                             if (taskMapInColumn.has(taskId)) {
                                 sortedTasks.push(taskMapInColumn.get(taskId)!);
-                                taskMapInColumn.delete(taskId);
+                                taskMapInColumn.delete(taskId); 
                             }
                         });
                         sortedTasks.push(...taskMapInColumn.values());
@@ -164,6 +340,9 @@
                 });
             }
             boardColumns = tempBoardColumns;
+
+        } else {
+            boardColumns = [];
         }
     }
 
@@ -195,11 +374,11 @@
     }
 
     function saveBoardStateToLocalStorage() {
-        if (!browser || !boardColumns || boardColumns.length === 0) return;
+        if (!browser || !boardColumns) return; 
         const layoutToSave: KanbanLayoutStorage = {
             columnOrder: boardColumns.map(col => col.id),
             taskOrders: boardColumns.reduce((acc, col) => {
-                acc[col.id] = col.tasks.map(task => task.id);
+                acc[col.id] = col.tasks.map(task => task.id); 
                 return acc;
             }, {} as Record<string, string[]>)
         };
@@ -238,9 +417,10 @@
     let handleEscKeyListener: ((event: KeyboardEvent) => void);
 
 	onMount(() => {
-        loadBoardStateFromLocalStorage();
+        loadBoardStateFromLocalStorage(); 
         DUMMY_DRAG_IMAGE = new Image();
         DUMMY_DRAG_IMAGE.src = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+        
         const storedDarkMode = localStorage.getItem('theme');
 		if (storedDarkMode === 'dark' || (!storedDarkMode && window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
 			isDarkMode = true;
@@ -249,12 +429,13 @@
             isDarkMode = false;
             if (browser) document.body.classList.remove('dark');
         }
+
         const setupIconListener = (iconId: string, windowId: string) => {
             const iconElement = document.getElementById(iconId);
             if (iconElement) {
                 const listener = (e: Event) => { e.stopPropagation(); toggleWindow(windowId); };
                 iconElement.addEventListener('click', listener);
-                (iconElement as any).__clickHandler = listener;
+                (iconElement as any).__clickHandler = listener; 
             }
         };
         setupIconListener('bellIcon', 'notifWindow');
@@ -262,6 +443,7 @@
         setupIconListener('profileIcon', 'profileWindow');
         const darkModeButton = document.getElementById('darkModeToggle');
         if (darkModeButton) darkModeButton.addEventListener('click', toggleDarkMode);
+
         handleGlobalClickListener = (event: MouseEvent) => {
             const target = event.target as Node | null;
             let isClickInsideHeaderDropdownTrigger = false;
@@ -275,14 +457,24 @@
             if (isSidebarOpen && sidebarEl && !sidebarEl.contains(target) && hamburgerButton && !hamburgerButton.contains(target)) closeSidebar();
         };
         if (browser) document.addEventListener('click', handleGlobalClickListener);
+
         handleEscKeyListener = (event: KeyboardEvent) => {
             if (event.key === 'Escape') {
-                if (isSidebarOpen) closeSidebar();
-                closeOtherWindows('');
+                if (isConfirmationModalOpen) {
+                    handleModalCancel();
+                } else if (isAddTaskModalOpen) {
+                    closeAddTaskModal();
+                } else if (isTaskDetailModalOpen) {
+                    isTaskDetailModalOpen = false;
+                } else {
+                    if (isSidebarOpen) closeSidebar();
+                    closeOtherWindows('');
+                }
             }
         };
 		if (browser) document.addEventListener('keydown', handleEscKeyListener);
-		return () => {
+
+		return () => { 
             if (browser) {
                 if (handleGlobalClickListener) document.removeEventListener('click', handleGlobalClickListener);
 			    if (handleEscKeyListener) document.removeEventListener('keydown', handleEscKeyListener);
@@ -295,17 +487,16 @@
             });
             const darkModeButtonEl = document.getElementById('darkModeToggle');
             if (darkModeButtonEl) darkModeButtonEl.removeEventListener('click', toggleDarkMode);
-            if (columnAnimationFrameId) cancelAnimationFrame(columnAnimationFrameId);
             if (cardAnimationFrameId) cancelAnimationFrame(cardAnimationFrameId);
 		};
 	});
 
-    function handleCardDragStart(event: DragEvent, task: PlaceholderTask, fromColumnBoardId: string) {
+    function handleCardDragStart(event: DragEvent, task: PlaceholderTask, fromDateKey: string) {
         if (event.dataTransfer && DUMMY_DRAG_IMAGE) {
             event.dataTransfer.setData('text/task-id', task.id);
             event.dataTransfer.effectAllowed = 'move';
             event.dataTransfer.setDragImage(DUMMY_DRAG_IMAGE, 0, 0);
-            draggedCardItem = { task, fromColumnId: fromColumnBoardId };
+            draggedCardItem = { task, fromColumnId: fromDateKey }; 
             activeDraggedCardElement = event.target as HTMLElement;
             const rect = activeDraggedCardElement.getBoundingClientRect();
             cardDragOffsetX = event.clientX - rect.left; cardDragOffsetY = event.clientY - rect.top;
@@ -336,128 +527,156 @@
         activeDraggedCardElement.style.transform = `rotate(2deg) scale(1.03)`;
         cardAnimationFrameId = requestAnimationFrame(updateCardPosition);
     }
-    function handleCardDragOverItem(event: DragEvent, targetColumnBoardId: string, overTaskId?: string) {
+    function handleCardDragOverItem(event: DragEvent, targetDateKey: string, overTaskId?: string) {
         event.preventDefault(); event.stopPropagation();
-        if (!draggedCardItem || draggedColumnItem) return;
+        if (!draggedCardItem) return; 
         if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
         let position: 'before' | 'after' | undefined = undefined;
         if (overTaskId && draggedCardItem && overTaskId !== draggedCardItem.task.id) {
             const targetCardElement = document.getElementById(`task-${overTaskId}`);
             if (targetCardElement && targetCardElement !== activeDraggedCardElement) { const rect = targetCardElement.getBoundingClientRect(); const midpointY = rect.top + rect.height / 2; position = event.clientY < midpointY ? 'before' : 'after'; }
         }
-        if (currentCardDragOverInfo?.columnId !== targetColumnBoardId || currentCardDragOverInfo?.overTaskId !== overTaskId || currentCardDragOverInfo?.position !== position) {
-            currentCardDragOverInfo = { columnId: targetColumnBoardId, overTaskId: (draggedCardItem && overTaskId === draggedCardItem.task.id) ? undefined : overTaskId, position };
+        if (currentCardDragOverInfo?.columnId !== targetDateKey || currentCardDragOverInfo?.overTaskId !== overTaskId || currentCardDragOverInfo?.position !== position) {
+            currentCardDragOverInfo = { columnId: targetDateKey, overTaskId: (draggedCardItem && overTaskId === draggedCardItem.task.id) ? undefined : overTaskId, position };
         }
     }
-    function handleCardDragLeaveItem(event: DragEvent, itemType: 'column' | 'card', itemId: string) {
+    function handleCardDragLeaveItem(event: DragEvent, itemType: 'column' | 'card', itemId: string) { 
         event.stopPropagation(); if (!draggedCardItem) return;
         const relatedTarget = event.relatedTarget as Node | null; const currentTarget = event.currentTarget as HTMLElement;
-        if (!relatedTarget || !currentTarget.closest('.kanban-board')?.contains(relatedTarget)) { currentCardDragOverInfo = null; return; }
+        if (!relatedTarget || !currentTarget.closest('.kanban-board')?.contains(relatedTarget)) {
+            currentCardDragOverInfo = null; return;
+        }
         if (itemType === 'card' && currentCardDragOverInfo?.overTaskId === itemId) {
             const columnElement = currentTarget.closest('.kanban-column');
             if (columnElement && columnElement.contains(relatedTarget) && !(relatedTarget as HTMLElement).closest('.kanban-card')) {
-                const columnBoardId = columnElement.getAttribute('data-column-id');
-                if (columnBoardId) { currentCardDragOverInfo = { columnId: columnBoardId }; }
+                const columnDateKey = columnElement.getAttribute('data-column-id');
+                if (columnDateKey) { currentCardDragOverInfo = { columnId: columnDateKey }; }
             }
         }
     }
-    async function handleDropOnCardOrColumn(event: DragEvent, targetColumnBoardId: string, dropTargetTaskId?: string) {
+    async function handleDropOnCardOrColumn(event: DragEvent, targetDateKey: string, dropTargetTaskId?: string) {
         event.preventDefault(); event.stopPropagation();
-        if (draggedColumnItem) return; if (!draggedCardItem) { cleanupCardDragState(); return; }
-        const { task: taskToMove, fromColumnId: originalBoardId } = draggedCardItem;
-        if (dropTargetTaskId === taskToMove.id && targetColumnBoardId === originalBoardId) { return; }
-        const sourceColIndex = boardColumns.findIndex(col => col.id === originalBoardId);
-        if (sourceColIndex === -1) { return; }
-        const taskIndexInSource = boardColumns[sourceColIndex].tasks.findIndex(t => t.id === taskToMove.id);
-        if (taskIndexInSource > -1) { boardColumns[sourceColIndex].tasks.splice(taskIndexInSource, 1); }
-        const destColIndex = boardColumns.findIndex(col => col.id === targetColumnBoardId);
-        if (destColIndex === -1) {
-            if (taskIndexInSource > -1) boardColumns[sourceColIndex].tasks.splice(taskIndexInSource, 0, taskToMove);
-            return;
+        if (!draggedCardItem) { cleanupCardDragState(); return; }
+
+        const { task: taskToMove, fromColumnId: originalDateKey } = draggedCardItem;
+
+        if (dropTargetTaskId === taskToMove.id && targetDateKey === originalDateKey) { cleanupCardDragState(); return; }
+
+        // Confirmation for due date change
+        if (originalDateKey !== targetDateKey) {
+            const confirmed = await showCustomConfirm(`Change due date of task "${taskToMove.title}" to ${formatDateForColumnTitle(targetDateKey)}?`);
+            if (!confirmed) {
+                cleanupCardDragState();
+                return;
+            }
+            isLoadingOperation = true; // Start loading after confirmation
         }
-        taskToMove.boardId = targetColumnBoardId; // Update boardId on the task object
+
+        const sourceCol = boardColumns.find(col => col.id === originalDateKey);
+        let taskIndexInSource = -1;
+        if (sourceCol) {
+            taskIndexInSource = sourceCol.tasks.findIndex(t => t.id === taskToMove.id);
+            if (taskIndexInSource > -1) {
+                sourceCol.tasks.splice(taskIndexInSource, 1);
+            }
+        } else {
+            console.warn("Source column not found for optimistic update:", originalDateKey);
+            for (const col of boardColumns) {
+                const idx = col.tasks.findIndex(t => t.id === taskToMove.id);
+                if (idx > -1) {
+                    col.tasks.splice(idx, 1);
+                    break;
+                }
+            }
+        }
+
+        const destCol = boardColumns.find(col => col.id === targetDateKey);
+        if (!destCol) {
+            console.error("Destination column not found for optimistic update:", targetDateKey);
+            if (sourceCol && taskIndexInSource > -1) sourceCol.tasks.splice(taskIndexInSource, 0, taskToMove);
+            cleanupCardDragState(); return;
+        }
+
         let inserted = false;
-        if (dropTargetTaskId && currentCardDragOverInfo?.position && (draggedCardItem && dropTargetTaskId !== draggedCardItem.task.id)) {
-            const targetIndexInDest = boardColumns[destColIndex].tasks.findIndex(t => t.id === dropTargetTaskId);
+        if (dropTargetTaskId && currentCardDragOverInfo?.position && (dropTargetTaskId !== taskToMove.id)) {
+            const targetIndexInDest = destCol.tasks.findIndex(t => t.id === dropTargetTaskId);
             if (targetIndexInDest > -1) {
-                if (currentCardDragOverInfo.position === 'before') { boardColumns[destColIndex].tasks.splice(targetIndexInDest, 0, taskToMove); }
-                else { boardColumns[destColIndex].tasks.splice(targetIndexInDest + 1, 0, taskToMove); }
+                if (currentCardDragOverInfo.position === 'before') {
+                    destCol.tasks.splice(targetIndexInDest, 0, taskToMove);
+                } else {
+                    destCol.tasks.splice(targetIndexInDest + 1, 0, taskToMove);
+                }
                 inserted = true;
             }
         }
-        if (!inserted) { boardColumns[destColIndex].tasks.push(taskToMove); }
-        if (originalBoardId !== targetColumnBoardId) {
+        if (!inserted) { 
+            destCol.tasks.push(taskToMove);
+        }
+        
+        taskToMove.dueDateISO = targetDateKey === NO_DUE_DATE_COLUMN_ID ? null : targetDateKey;
+
+        boardColumns = [...boardColumns]; 
+        saveBoardStateToLocalStorage(); 
+
+        if (originalDateKey !== targetDateKey) {
             const formData = new FormData();
             formData.append('taskId', taskToMove.id);
-            formData.append('newBoardId', targetColumnBoardId);
+            const newDueDateForServer = targetDateKey === NO_DUE_DATE_COLUMN_ID ? '' : targetDateKey;
+            formData.append('newDueDateISO', newDueDateForServer);
+            
             try {
-                const response = await fetch('?/moveTaskToBoard', { method: 'POST', body: formData });
+                const response = await fetch('?/updateTaskDueDate', { method: 'POST', body: formData }); 
                 if (!response.ok) {
-                    const result = await response.json().catch(() => ({moveTaskForm: { error: "Failed to parse server error" }}));
-                    console.error('Failed to update task boardId on server:', result.moveTaskForm?.error || 'Unknown server error');
+                    const result = await response.json().catch(() => ({updateDueDateForm: { error: "Failed to parse server error" }}));
+                    console.error('Failed to update task due date on server:', result.updateDueDateForm?.error || 'Unknown server error');
                 } else {
                     const result = await response.json();
-                    if (!result.moveTaskForm?.success) console.error('Server indicated failure after OK response for moveTaskToBoard:', result.moveTaskForm?.error);
+                     if (!result.updateDueDateForm?.success) {
+                        console.error('Server indicated failure for updateTaskDueDate:', result.updateDueDateForm?.error);
+                    }
                 }
-            } catch (err) { console.error('Error calling moveTaskToBoard action:', err); }
+            } catch (err) {
+                console.error('Error calling updateTaskDueDate action:', err);
+            } finally {
+                isLoadingOperation = false; // End loading
+            }
         }
-        boardColumns = [...boardColumns];
-        saveBoardStateToLocalStorage();
+        cleanupCardDragState();
     }
     function handleCardDragEnd() {
         if (cardAnimationFrameId) { cancelAnimationFrame(cardAnimationFrameId); cardAnimationFrameId = null; }
-        if (activeDraggedCardElement) { activeDraggedCardElement.classList.remove('dragging-card'); activeDraggedCardElement.style.position = ''; activeDraggedCardElement.style.left = ''; activeDraggedCardElement.style.top = ''; activeDraggedCardElement.style.width = ''; activeDraggedCardElement.style.height = ''; activeDraggedCardElement.style.zIndex = ''; activeDraggedCardElement.style.transform = ''; activeDraggedCardElement.style.margin = ''; }
-        cleanupCardDragState();
-    }
-    function cleanupCardDragState() { draggedCardItem = null; currentCardDragOverInfo = null; activeDraggedCardElement = null; cardDragOffsetX = 0; cardDragOffsetY = 0; currentCardX = 0; currentCardY = 0; targetCardX = 0; targetCardY = 0; cardVelocityX = 0; cardVelocityY = 0; if(cardAnimationFrameId) cancelAnimationFrame(cardAnimationFrameId); cardAnimationFrameId = null; }
-
-    function handleColumnDragStart(event: DragEvent, column: PlaceholderColumn) {
-        if (event.dataTransfer && DUMMY_DRAG_IMAGE) { event.dataTransfer.setData('text/column-id', column.id); event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setDragImage(DUMMY_DRAG_IMAGE, 0, 0); draggedColumnItem = column; activeDraggedColumnElement = (event.target as HTMLElement).closest('.kanban-column') as HTMLElement; if (activeDraggedColumnElement) { const rect = activeDraggedColumnElement.getBoundingClientRect(); columnDragOffsetX = event.clientX - rect.left; columnDragOffsetY = event.clientY - rect.top; currentColumnX = rect.left; currentColumnY = rect.top; targetColumnX = rect.left; targetColumnY = rect.top; velocityX = 0; velocityY = 0; currentRotation = 0; targetRotation = 0; rotationVelocity = 0; currentSkewX = 0; targetSkewX = 0; skewXVelocity = 0; activeDraggedColumnElement.style.position = 'fixed'; activeDraggedColumnElement.style.left = `${currentColumnX}px`; activeDraggedColumnElement.style.top = `${currentColumnY}px`; activeDraggedColumnElement.style.width = `${rect.width}px`; activeDraggedColumnElement.style.height = `${rect.height}px`; activeDraggedColumnElement.style.zIndex = '1000'; activeDraggedColumnElement.style.transformOrigin = `${columnDragOffsetX}px ${columnDragOffsetY}px`; setTimeout(() => { activeDraggedColumnElement?.classList.add('dragging-column'); },0); if (columnAnimationFrameId) cancelAnimationFrame(columnAnimationFrameId); columnAnimationFrameId = requestAnimationFrame(updateColumnEffects); } }
-        event.stopPropagation();
-    }
-    function handleColumnDrag(event: DragEvent) { if (!activeDraggedColumnElement || !draggedColumnItem) return; if (event.clientX === 0 && event.clientY === 0 && event.screenX === 0 && event.screenY ===0) return; targetColumnX = event.clientX - columnDragOffsetX; targetColumnY = event.clientY - columnDragOffsetY; }
-    function updateColumnEffects() { if (!activeDraggedColumnElement) { if (columnAnimationFrameId) cancelAnimationFrame(columnAnimationFrameId); columnAnimationFrameId = null; return; } let forceX = (targetColumnX - currentColumnX) * POS_SPRING_STIFFNESS; let forceY = (targetColumnY - currentColumnY) * POS_SPRING_STIFFNESS; velocityX += forceX; velocityY += forceY; velocityX *= POS_DAMPING_FACTOR; velocityY *= POS_DAMPING_FACTOR; currentColumnX += velocityX; currentColumnY += velocityY; targetSkewX = -velocityX * 0.5; targetSkewX = Math.max(-MAX_SKEW_X, Math.min(MAX_SKEW_X, targetSkewX)); targetRotation = -velocityX * 0.2; targetRotation = Math.max(-MAX_ROTATION, Math.min(MAX_ROTATION, targetRotation)); let forceSkew = (targetSkewX - currentSkewX) * DEFORM_SPRING_STIFFNESS; skewXVelocity += forceSkew; skewXVelocity *= DEFORM_DAMPING_FACTOR; currentSkewX += skewXVelocity; let forceRot = (targetRotation - currentRotation) * DEFORM_SPRING_STIFFNESS; rotationVelocity += forceRot; rotationVelocity *= DEFORM_DAMPING_FACTOR; currentRotation += rotationVelocity; if (Math.abs(velocityX) < 0.1 && Math.abs(velocityY) < 0.1 && Math.abs(targetColumnX - currentColumnX) < 0.1 && Math.abs(targetColumnY - currentColumnY) < 0.1) { if (Math.abs(currentSkewX) < 0.1 && Math.abs(currentRotation) < 0.1) { currentColumnX = targetColumnX; currentColumnY = targetColumnY; velocityX = 0; velocityY = 0; currentSkewX = 0; targetSkewX = 0; skewXVelocity = 0; currentRotation = 0; targetRotation = 0; rotationVelocity = 0; } } activeDraggedColumnElement.style.left = `${currentColumnX}px`; activeDraggedColumnElement.style.top = `${currentColumnY}px`; const baseTransform = "translateY(-6px) scale(1.02)"; activeDraggedColumnElement.style.transform = `rotate(${currentRotation}deg) skewX(${currentSkewX}deg) ${baseTransform}`; columnAnimationFrameId = requestAnimationFrame(updateColumnEffects); }
-    function handleBoardDragOver(event: DragEvent) { event.preventDefault(); if (!draggedColumnItem || draggedCardItem) return; if (event.dataTransfer) event.dataTransfer.dropEffect = 'move'; const boardElement = (event.currentTarget as HTMLElement).querySelector('.kanban-board'); if (!boardElement || !activeDraggedColumnElement) return; const staticColumns = Array.from(boardElement.querySelectorAll('.kanban-column:not(.dragging-column)')) as HTMLElement[]; let newIndex = staticColumns.length; const mouseX = event.clientX; for (let i = 0; i < staticColumns.length; i++) { const staticColRect = staticColumns[i].getBoundingClientRect(); const staticColCenterX = staticColRect.left + staticColRect.width / 2; if (mouseX < staticColCenterX) { newIndex = i; break; } } if (columnDragOverIndex !== newIndex) { columnDragOverIndex = newIndex; } }
-    function handleBoardDragLeave(event: DragEvent) { if (!draggedColumnItem) return; const boardContainer = event.currentTarget as HTMLElement; const board = boardContainer.querySelector('.kanban-board'); if (board && event.relatedTarget && !board.contains(event.relatedTarget as Node)) { columnDragOverIndex = null; } else if (!event.relatedTarget) { columnDragOverIndex = null; } }
-    function handleColumnDropOnBoard(event: DragEvent) {
-        event.preventDefault(); event.stopPropagation();
-        if (!draggedColumnItem || draggedCardItem) { cleanupColumnDragState(); return; }
-        const droppedColumnId = event.dataTransfer?.getData('text/column-id');
-        if (!draggedColumnItem || !droppedColumnId || droppedColumnId !== draggedColumnItem.id) {
-            cleanupColumnDragState(); return;
+        if (activeDraggedCardElement) {
+            activeDraggedCardElement.classList.remove('dragging-card');
+            activeDraggedCardElement.style.position = ''; activeDraggedCardElement.style.left = ''; activeDraggedCardElement.style.top = '';
+            activeDraggedCardElement.style.width = ''; activeDraggedCardElement.style.height = '';
+            activeDraggedCardElement.style.zIndex = ''; activeDraggedCardElement.style.transform = ''; activeDraggedCardElement.style.margin = '';
         }
-        const fromIndex = boardColumns.findIndex(col => col.id === draggedColumnItem!.id);
-        if (fromIndex > -1 && columnDragOverIndex !== null && columnDragOverIndex !== fromIndex) {
-            const [movedColumn] = boardColumns.splice(fromIndex, 1);
-            boardColumns.splice(columnDragOverIndex, 0, movedColumn);
-            boardColumns = [...boardColumns];
-            saveBoardStateToLocalStorage();
-        }
+        cleanupCardDragState(); // Call to reset other drag-related state variables
     }
-    function handleColumnDragEnd() {
-        if (columnAnimationFrameId) { cancelAnimationFrame(columnAnimationFrameId); columnAnimationFrameId = null; }
-        if (activeDraggedColumnElement) {
-            activeDraggedColumnElement.classList.remove('dragging-column');
-            activeDraggedColumnElement.style.position = ''; activeDraggedColumnElement.style.left = ''; activeDraggedColumnElement.style.top = ''; activeDraggedColumnElement.style.width = ''; activeDraggedColumnElement.style.height = ''; activeDraggedColumnElement.style.zIndex = ''; activeDraggedColumnElement.style.transformOrigin = ''; activeDraggedColumnElement.style.transform = '';
-        }
-        cleanupColumnDragState();
+     function cleanupCardDragState() {
+        draggedCardItem = null; 
+        currentCardDragOverInfo = null; 
+        activeDraggedCardElement = null;
+        cardDragOffsetX = 0; cardDragOffsetY = 0; currentCardX = 0; currentCardY = 0; targetCardX = 0; targetCardY = 0;
+        cardVelocityX = 0; cardVelocityY = 0;
+        if(cardAnimationFrameId) cancelAnimationFrame(cardAnimationFrameId); cardAnimationFrameId = null;
     }
-    function cleanupColumnDragState() { draggedColumnItem = null; activeDraggedColumnElement = null; columnDragOverIndex = null; columnDragOffsetX = 0; columnDragOffsetY = 0; velocityX = 0; velocityY = 0; currentColumnX = 0; currentColumnY = 0; targetColumnX = 0; targetColumnY = 0; currentRotation = 0; targetRotation = 0; rotationVelocity = 0; currentSkewX = 0; targetSkewX = 0; skewXVelocity = 0; if(columnAnimationFrameId) cancelAnimationFrame(columnAnimationFrameId); columnAnimationFrameId = null; }
 
 </script>
 
 <!-- HTML Structure -->
 <div class="page-wrapper font-sans">
+    <LoadingIndicator fullScreen={isLoadingOperation} />
 	{#if isSidebarOpen}
     <aside
-        id="sidebar"
-        class="sidebar-container"
-        transition:fly={{ x: -300, duration: 300, easing: quintOut }}
-    >
-      <div>
-        <div class="sidebar-header">
-          <img src="/logonamin.png" alt="Microtask Logo" class="sidebar-logo-img" />
-          <h1 class="sidebar-title">Microtask</h1>
+         id="sidebar"
+  class={`fixed top-0 left-0 h-full w-64 shadow-lg z-50 flex flex-col justify-between p-4 border-r ${isDarkMode ? 'bg-zinc-800 border-zinc-700' : 'bg-white border-gray-200'}`}
+  transition:fly={{ x: -300, duration: 300, easing: quintOut }}
+>
+  <div>
+    <div class="flex items-center gap-2 mb-8 pb-4 border-b ${isDarkMode ? 'border-zinc-700' : 'border-gray-200'}">
+      <img src={isDarkMode ? "/logonamindarkmode.png" : "/logonamin.png"} alt="Microtask Logo" class="w-8 h-8" />
+      <h1 class={`text-xl font-bold ${isDarkMode ? 'text-zinc-100' : 'text-gray-800'}`}>Microtask</h1>
         </div>
         <nav class="sidebar-nav">
           <a href="/home" class="nav-link" class:active={$page.url.pathname === '/home' || $page.url.pathname === '/'}>
@@ -483,7 +702,7 @@
         </nav>
       </div>
         <form method="POST" action="?/logout" use:enhance={() => {
-            if (browser) localStorage.removeItem(KANBAN_STORAGE_KEY);
+            if (browser) localStorage.removeItem(KANBAN_STORAGE_KEY); 
             return async ({ update }) => { await update(); };
         }}>
             <button type="submit" class="logout-button">
@@ -495,16 +714,16 @@
 	{/if}
 
 	<div class="main-content-wrapper">
-		<header class="top-header">
-			<div class="header-left">
-				<button id="hamburgerButton" class="menu-btn" on:click={toggleSidebar} aria-label="Toggle Sidebar">
-            		<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" /></svg>
-				</button>
-                <a href="/home" class="logo">
-                    <img src="/logonamin.png" alt="Microtask Logo" />
-                    <span class="top-header-logo-text">Microtask</span>
-                </a>
-			</div>
+	<header class="top-header">
+		<div class="header-left">
+			<button id="hamburgerButton" class="menu-btn" on:click={toggleSidebar} aria-label="Toggle Sidebar">
+        		<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" /></svg>
+			</button>
+            <a href="/home" class="logo">
+                <img src={isDarkMode ? "/logonamindarkmode.png" : "/logonamin.png"} alt="Microtask Logo" />
+                <span class="top-header-logo-text">Microtask</span>
+            </a>
+		</div>
 			<div class="header-icons">
                 <div class="relative">
                     <button id="bellIcon" class="header-icon-btn" aria-label="Notifications">
@@ -548,41 +767,29 @@
 
         <main class="main-content-kanban">
             <div class="board-header-kanban">
-                <h1 class="board-title-kanban">My Workspaces</h1>
+                <h1 class="board-title-kanban">Tasks by Due Date</h1>
             </div>
-            <div
-                class="kanban-board-scroll-container"
-                on:dragover={handleBoardDragOver}
-                on:dragleave={handleBoardDragLeave}
-                on:drop={handleColumnDropOnBoard}
-            >
+            <div class="kanban-board-scroll-container">
                 <div class="kanban-board">
                     {#if data.error}
                         <p class="p-4 text-red-600">Error loading board: {data.error}</p>
                     {:else if !boardColumns || boardColumns.length === 0}
-                        {#if !data.workspaces || data.workspaces.length === 0}
-                             <p class="p-4 text-gray-500">No workspaces found. Consider adding some in Firestore or checking server logs.</p>
-                        {:else}
-                            <p class="p-4 text-gray-500">Initializing board...</p> <!-- Or "No tasks found for these workspaces." -->
-                        {/if}
+                        <p class="p-4 text-gray-500">No tasks found or tasks have no due dates to display.</p>
                     {/if}
 
-                    {#each boardColumns as column, i (column.id)}
-                        {#if draggedColumnItem && columnDragOverIndex === i }
-                            <div class="column-drop-placeholder" style="height: {activeDraggedColumnElement?.offsetHeight || 150}px;"></div>
-                        {/if}
+                    {#each boardColumns as column (column.id)}
                         <div
                             class="kanban-column"
                             class:drag-over-column={currentCardDragOverInfo?.columnId === column.id && !currentCardDragOverInfo?.overTaskId && draggedCardItem}
-                            data-column-id={column.id}
-                            on:dragover={(e) => { if(draggedCardItem) handleCardDragOverItem(e, column.id); else e.preventDefault(); }}
-                            on:dragleave={(e) => { if(draggedCardItem) handleCardDragLeaveItem(e, 'column', column.id);}}
-                            on:drop={(e) => { if(draggedCardItem) handleDropOnCardOrColumn(e, column.id);}}
+                            data-column-id={column.id} 
+                            on:dragover={(e: DragEvent) => { if(draggedCardItem) handleCardDragOverItem(e, column.id); else e.preventDefault(); }}
+                            on:dragleave={(e: DragEvent) => { if(draggedCardItem) handleCardDragLeaveItem(e, 'column', column.id);}}
+                            on:drop={(e: DragEvent) => { if(draggedCardItem) handleDropOnCardOrColumn(e, column.id);}}
                         >
-                            <div class="column-header" draggable="true" on:dragstart={(e) => handleColumnDragStart(e, column)} on:drag={handleColumnDrag} on:dragend={handleColumnDragEnd}>
-                                <h3 class="column-title">{column.title || 'Loading Name...'}</h3> <!-- Check this -->
+                            <div class="column-header">
+                                <h3 class="column-title">{column.title}</h3>
                                 <span class="column-task-count">{column.tasks.length}</span>
-                                <button class="column-options-button" title="Column options">
+                                <button class="column-options-button" title="Column options (not implemented for date columns)">
                                     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="16" height="16"><path d="M12 3C10.9 3 10 3.9 10 5C10 6.1 10.9 7 12 7C13.1 7 14 6.1 14 5C14 3.9 13.1 3 12 3ZM12 17C10.9 17 10 17.9 10 19C10 20.1 10.9 21 12 21C13.1 21 14 20.1 14 19C14 17.9 13.1 17 12 17ZM12 10C10.9 10 10 10.9 10 12C10 13.1 10.9 14 12 14C13.1 14 14 13.1 14 12C14 10.9 13.1 10 12 10Z"></path></svg>
                                 </button>
                             </div>
@@ -590,8 +797,8 @@
                                 {#if column.tasks.length === 0 && !draggedCardItem && !(currentCardDragOverInfo?.columnId === column.id && draggedCardItem)}
                                     <div
                                         class="empty-column-dropzone"
-                                        on:dragover={(e) => { if(draggedCardItem) handleCardDragOverItem(e, column.id); else e.preventDefault(); }}
-                                        on:drop={(e) => { if(draggedCardItem) handleDropOnCardOrColumn(e, column.id);}}
+                                        on:dragover={(e: DragEvent) => { if(draggedCardItem) handleCardDragOverItem(e, column.id); else e.preventDefault(); }}
+                                        on:drop={(e: DragEvent) => { if(draggedCardItem) handleDropOnCardOrColumn(e, column.id);}}
                                     >Drop card here</div>
                                 {/if}
                                 {#each column.tasks as task (task.id)}
@@ -607,6 +814,7 @@
                                         on:dragover={(e) => handleCardDragOverItem(e, column.id, task.id)}
                                         on:dragleave={(e) => handleCardDragLeaveItem(e, 'card', task.id)}
                                         on:drop={(e) => handleDropOnCardOrColumn(e, column.id, task.id)}
+                                        on:click={() => openTaskDetailModal(task)}
                                     >
                                         <div class="card-labels"></div>
                                         <h4 class="card-title">{task.title}</h4>
@@ -614,164 +822,180 @@
                                         <div class="card-footer">
                                             <div class="card-meta-icons">
                                                 {#if task.description} <span class="meta-icon" title="Has description"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="14" height="14"><path d="M3 18H21V16H3V18ZM3 13H21V11H3V13ZM3 8H21V6H3V8Z"></path></svg></span> {/if}
-                                                {#if task.dueDateISO} <span class="meta-icon" title="Due date: {task.dueDateISO}"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="14" height="14"><path d="M17 3H19V5H17V3M17 7H19V9H17V7M5 3H7V5H5V3M5 7H7V9H5V7M16 1V3H8V1H6V3H5C3.89 3 3 3.9 3 5V19C3 20.1 3.89 21 5 21H19C20.1 21 21 20.1 21 19V5C21 3.9 20.1 3 19 3H18V1H16M19 19H5V10H19V19Z"></path></svg><span class="due-date-text">{new Date(task.dueDateISO).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span></span> {/if}
+                                                {#if task.dueDateISO && column.id !== NO_DUE_DATE_COLUMN_ID}
+                                                    <span class="meta-icon" title="Due date: {task.dueDateISO}">
+                                                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="14" height="14"><path d="M17 3H19V5H17V3M17 7H19V9H17V7M5 3H7V5H5V3M5 7H7V9H5V7M16 1V3H8V1H6V3H5C3.89 3 3 3.9 3 5V19C3 20.1 3.89 21 5 21H19C20.1 21 21 20.1 21 19V5C21 3.9 20.1 3 19 3H18V1H16M19 19H5V10H19V19Z"></path></svg>
+                                                        <span class="due-date-text">{new Date(task.dueDateISO.replace(/-/g, '/')).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>
+                                                    </span>
+                                                {/if}
+                                                {#if task.dueTime && column.id !== NO_DUE_DATE_COLUMN_ID}
+                                                    <span class="meta-icon" title="Due time: {task.dueTime}">
+                                                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="14" height="14"><path d="M12 2C6.486 2 2 6.486 2 12s4.486 10 10 10 10-4.486 10-10S17.514 2 12 2zm0 18c-4.411 0-8-3.589-8-8s3.589-8 8-8 8 3.589 8 8-3.589 8-8 8z"></path><path d="M13 7h-2v5.414l3.293 3.293 1.414-1.414L13 11.586z"></path></svg>
+                                                        <span class="due-date-text">{task.dueTime}</span>
+                                                    </span>
+                                                {/if}
                                             </div>
                                         </div>
                                     </div>
                                 {/each}
-                                {#if !draggedColumnItem && !draggedCardItem }
-                                    <button class="add-card-button" on:click={() => alert(`Add card to workspace: ${column.title} (ID: ${column.id})`)}>+ Add a card</button>
+                                {#if !draggedCardItem } 
+                                    <button class="add-card-button" on:click={() => openAddTaskModal(column.id)}>+ Add a card</button>
                                 {/if}
                             </div>
                         </div>
                     {/each}
-                    {#if draggedColumnItem && columnDragOverIndex === boardColumns.length}
-                        <div class="column-drop-placeholder" style="height: {activeDraggedColumnElement?.offsetHeight || 150}px;"></div>
-                    {/if}
-                    <div class="add-list-wrapper">
-                        <button class="add-list-button" on:click={() => alert('Functionality to add a new workspace (column) to be implemented. This would involve adding a new document to the "workspaces" collection in Firestore.')}>
-                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="16" height="16" style="margin-right: 4px;"><path d="M11 11V5H13V11H19V13H13V19H11V13H5V11H11Z"></path></svg>
-                            Add another list
-                        </button>
-                    </div>
                 </div>
             </div>
         </main>
 	</div>
 </div>
 
+{#if isConfirmationModalOpen}
+<div class="modal-overlay" on:click={handleModalCancel}>
+    <div class="modal-content" on:click|stopPropagation>
+        <h3 class="modal-title">Confirm Action</h3>
+        <p class="modal-message">{confirmationModalMessage}</p>
+        <div class="modal-actions">
+            <button class="modal-button modal-button-cancel" on:click={handleModalCancel}>Cancel</button>
+            <button class="modal-button modal-button-confirm" on:click={handleModalConfirm}>Confirm</button>
+        </div>
+    </div>
+</div>
+{/if}
+
+<TaskDetailModal bind:isOpen={isTaskDetailModalOpen} task={selectedTaskForModal} 
+    on:close={() => isTaskDetailModalOpen = false}
+    on:updated={async () => {
+        isLoadingOperation = true; // Start loading for task update
+        console.log('Task update action completed, refreshing data...');
+        await invalidateAll(); // This will re-run the load function for the page
+        isTaskDetailModalOpen = false; // Close modal after update
+        isLoadingOperation = false; // End loading
+    }}
+    on:delete={async (event) => {
+        isLoadingOperation = true; // Start loading for task delete
+        const taskIdToDelete = event.detail.taskId;
+        console.log('Attempting to delete task:', taskIdToDelete);
+        const formData = new FormData();
+        formData.append('taskId', taskIdToDelete);
+
+        try {
+            const response = await fetch('?/deleteTask', {
+                method: 'POST',
+                body: formData
+            });
+            const result = await response.json();
+
+            if (result.deleteTaskForm?.successMessage) {
+                console.log(result.deleteTaskForm.successMessage);
+                await invalidateAll(); // Refresh list
+            } else if (result.deleteTaskForm?.error) {
+                alert(`Error deleting task: ${result.deleteTaskForm.error}`);
+            } else {
+                alert('An unknown error occurred while deleting the task.');
+            }
+        } catch (error) {
+            console.error('Error deleting task:', error);
+            alert('An error occurred while deleting the task.');
+        } finally {
+            isTaskDetailModalOpen = false; // Close modal after delete attempt
+            isLoadingOperation = false; // End loading
+        }
+    }}
+/>
+
+{#if isAddTaskModalOpen}
+<div class="modal-overlay" on:click={closeAddTaskModal}>
+    <div class="modal-content add-task-modal-content" on:click|stopPropagation>
+        <form method="POST" action="?/addTask" use:enhance={handleAddTaskEnhance}>
+            <h3 class="modal-title">Add New Task
+                {#if addTaskTargetColumnId}
+                    to {formatDateForColumnTitle(addTaskTargetColumnId)}
+                {/if}
+            </h3>
+            
+            {#if addTaskFormError}
+                <p class="form-error-message">{addTaskFormError}</p>
+            {/if}
+
+            <div class="form-group">
+                <label for="newTaskTitle" class="form-label">Task Name*</label>
+                <input type="text" id="newTaskTitle" name="title" bind:value={newTaskTitle} required class="form-input" placeholder="e.g., Finalize report"/>
+            </div>
+
+            <div class="form-group-row">
+                <div class="form-group">
+                    <label for="newTaskDueDate" class="form-label">Due Date*</label>
+                    <input type="date" id="newTaskDueDate" name="dueDate" bind:value={newTaskDueDate} required class="form-input"/>
+                </div>
+                <div class="form-group">
+                    <label for="newTaskDueTime" class="form-label">Due Time*</label>
+                    <input type="time" id="newTaskDueTime" name="dueTime" bind:value={newTaskDueTime} required class="form-input"/>
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label for="newTaskDescription" class="form-label">Description</label>
+                <textarea id="newTaskDescription" name="description" bind:value={newTaskDescription} class="form-textarea" placeholder="Add more details..."></textarea>
+            </div>
+
+            <div class="form-group">
+                <label for="newTaskPriority" class="form-label">Priority</label>
+                <select id="newTaskPriority" name="priority" bind:value={newTaskPriority} class="form-select">
+                    <option value="standard">Standard</option>
+                    <option value="low">Low</option>
+                    <option value="medium">Medium</option>
+                    <option value="high">High</option>
+                </select>
+            </div>
+
+            <div class="modal-actions">
+                <button type="button" class="modal-button modal-button-cancel" on:click={closeAddTaskModal} disabled={addTaskFormSubmitting}>Cancel</button>
+                <button type="submit" class="modal-button modal-button-confirm" disabled={addTaskFormSubmitting}>
+                    {addTaskFormSubmitting ? 'Adding...' : 'Add Task'}
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+{/if}
 <style>
-    /* --- DASHBOARD STYLES (Copied Verbatim from your dashboard component) --- */
-    /* --- Base Styles & Font --- */
-    .font-sans {
-        font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-    }
-    .page-wrapper { /* Applied to the root div */
-        display: flex;
-        height: 100vh;
-        color: #1f2937; /* text-gray-800 */
-        background-color: #ffffff; /* Default light background for the entire wrapper */
-    }
-    canvas { display: block; }
-    .hidden-dropdown { display: none !important; }
-    .capitalize { text-transform: capitalize; }
-
-	/* --- Sidebar --- */
-    .sidebar-container {
-        background-color: #ffffff;
-        border-right: 1px solid #e5e7eb;
-        color: #374151;
-        position: fixed; top: 0; left: 0; height: 100%; width: 16rem; /* w-64 */
-        box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1), 0 4px 6px -2px rgba(0,0,0,0.05); /* shadow-lg */
-        z-index: 50; display: flex; flex-direction: column; justify-content: space-between;
-        padding: 1rem; /* p-4 */
-        box-sizing: border-box;
-    }
-    .sidebar-header {
-        display: flex; align-items: center; gap: 0.5rem; /* gap-2 */
-        margin-bottom: 2rem; /* mb-8 */
-        padding-bottom: 1rem; /* pb-4 */
-        border-bottom: 1px solid #e5e7eb;
-    }
-    .sidebar-logo-img { width: 2rem; height: 2rem; } /* w-8 h-8 */
-    .sidebar-title { color: #1f2937; font-size: 1.25rem; font-weight: 700; } /* text-xl font-bold */
-
-    .sidebar-nav { display: flex; flex-direction: column; gap: 0.5rem; /* gap-2 */ }
-    .nav-link {
-        color: #374151;
-        display: flex; align-items: center; gap: 0.75rem; /* gap-3 */
-        padding: 0.5rem 0.75rem; /* px-3 py-2 */
-        border-radius: 0.375rem; /* rounded-md */
-        font-weight: 600; /* font-semibold */
-        transition-property: color, background-color, border-color, text-decoration-color, fill, stroke;
-        transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
-        transition-duration: 150ms;
-        text-decoration: none;
-    }
+    /* --- SHARED STYLES --- */
+    .font-sans { font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+    .page-wrapper { display: flex; height: 100vh; color: #1f2937; background-color: #ffffff; }
+    canvas { display: block; } .hidden-dropdown { display: none !important; } .capitalize { text-transform: capitalize; }
+	.sidebar-container { background-color: #ffffff; border-right: 1px solid #e5e7eb; color: #374151; position: fixed; top: 0; left: 0; height: 100%; width: 16rem; box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1), 0 4px 6px -2px rgba(0,0,0,0.05); z-index: 50; display: flex; flex-direction: column; justify-content: space-between; padding: 1rem; box-sizing: border-box; }
+    .sidebar-header { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 2rem; padding-bottom: 1rem; border-bottom: 1px solid #e5e7eb; }
+    .sidebar-logo-img { width: 2rem; height: 2rem; }
+    .sidebar-title { color: #1f2937; font-size: 1.25rem; font-weight: 700; }
+    .sidebar-nav { display: flex; flex-direction: column; gap: 0.5rem; }
+    .nav-link { color: #374151; display: flex; align-items: center; gap: 0.75rem; padding: 0.5rem 0.75rem; border-radius: 0.375rem; font-weight: 600; transition: all 150ms cubic-bezier(0.4, 0, 0.2, 1); text-decoration: none; }
     .nav-link:hover { background-color: #f3f4f6;  }
     .nav-link.active { background-color: #2563eb; color: #ffffff; }
-    .nav-icon { width: 1.25rem; height: 1.25rem; } /* w-5 h-5 */
+    .nav-icon { width: 1.25rem; height: 1.25rem; }
     .nav-link.active .nav-icon { filter: brightness(0) invert(1); }
-
-    .logout-button { /* Applied to the button inside the form */
-        color: #374151;
-        display: flex; align-items: center; gap: 0.75rem;
-        padding: 0.5rem 0.75rem; border-radius: 0.375rem; font-weight: 600;
-        width: 100%; margin-top: auto; /* Pushes to bottom if in flex column */
-        transition: background-color 150ms ease;
-        background: none; border: none; cursor: pointer; text-align: left;
-        font-family: inherit; font-size: inherit;
-    }
+    .logout-button { color: #374151; display: flex; align-items: center; gap: 0.75rem; padding: 0.5rem 0.75rem; border-radius: 0.375rem; font-weight: 600; width: 100%; margin-top: auto; transition: background-color 150ms ease; background: none; border: none; cursor: pointer; text-align: left; font-family: inherit; font-size: inherit; }
     .logout-button:hover { background-color: #f3f4f6; }
     .logout-button .nav-icon { width: 1.25rem; height: 1.25rem; }
-
-    /* --- Top Header --- */
-    .top-header {
-        position: fixed; top: 0; /* left: 0; by default */ right: 0;
-        width: 100%;
-        display: flex; align-items: center; justify-content: space-between;
-        padding: 0 1rem; height: 60px; z-index: 40;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.05);
-        transition: background-color 0.2s, border-color 0.2s, left 0.3s ease; /* Added left transition */
-        background-color: #ffffff;
-        border-bottom: 1px solid #e5e7eb;
-        color: #1f2937;
-        box-sizing: border-box;
-    }
+    .top-header { position: fixed; top: 0; right: 0; width: 100%; display: flex; align-items: center; justify-content: space-between; padding: 0 1rem; height: 60px; z-index: 40; box-shadow: 0 1px 3px rgba(0,0,0,0.05); transition: background-color 0.2s, border-color 0.2s, left 0.3s ease; background-color: #ffffff; border-bottom: 1px solid #e5e7eb; color: #1f2937; box-sizing: border-box; }
     .header-left { display: flex; align-items: center; gap: 0.75rem; }
-    .top-header .menu-btn {
-        background: none; border: none; cursor: pointer; padding: 0.5rem;
-        border-radius: 9999px; transition: background-color 0.15s ease;
-        display: flex; align-items: center; justify-content: center;
-        color: inherit;
-    }
+    .top-header .menu-btn { background: none; border: none; cursor: pointer; padding: 0.5rem; border-radius: 9999px; transition: background-color 0.15s ease; display: flex; align-items: center; justify-content: center; color: inherit; }
     .top-header .menu-btn svg { width: 1.5rem; height: 1.5rem; }
     .top-header .menu-btn:hover { background-color: #f3f4f6; }
     .top-header .logo { display: flex; align-items: center; gap: 0.5rem; text-decoration: none;}
     .top-header .logo img { height: 2rem; width: auto; }
     .top-header .logo .top-header-logo-text { color: #1f2937; font-weight: 600; font-size: 1.25rem; }
-
     .top-header .header-icons { display: flex; align-items: center; gap: 0.25rem; }
-    .top-header .header-icons .header-icon-btn {
-        background: none; border: none; cursor: pointer; padding: 0.5rem;
-        line-height: 0; display: flex; align-items: center; justify-content: center;
-        border-radius: 9999px; width: 36px; height: 36px;
-        transition: background-color 0.15s ease; color: inherit;
-    }
+    .top-header .header-icons .header-icon-btn { background: none; border: none; cursor: pointer; padding: 0.5rem; line-height: 0; display: flex; align-items: center; justify-content: center; border-radius: 9999px; width: 36px; height: 36px; transition: background-color 0.15s ease; color: inherit; }
     .top-header .header-icons .header-icon-btn svg { width: 1.25rem; height: 1.25rem; }
     .top-header .header-icons .header-icon-btn:hover { background-color: #f3f4f6; }
-
-    .darkmode-toggle-button {
-        margin-left: 0.5rem; padding: 0.375rem;
-        background: none; border: none; cursor: pointer;
-        line-height: 0; display: flex; align-items: center; justify-content: center;
-        border-radius: 9999px; width: 36px; height: 36px;
-        transition: background-color 0.15s ease; color: #374151;
-    }
+    .darkmode-toggle-button { margin-left: 0.5rem; padding: 0.375rem; background: none; border: none; cursor: pointer; line-height: 0; display: flex; align-items: center; justify-content: center; border-radius: 9999px; width: 36px; height: 36px; transition: background-color 0.15s ease; color: #374151; }
     .darkmode-toggle-button svg { width: 1.25rem; height: 1.25rem; }
     .darkmode-toggle-button:hover { background-color: #f3f4f6; }
-
-    /* Dropdown Windows */
     .relative { position: relative; }
-    .dropdown-window {
-        position: absolute; right: 0; top: calc(100% + 8px);
-        border-radius: 0.5rem;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.1);
-        padding: 0.75rem;
-        z-index: 50;
-        opacity: 0; transform: translateY(-5px) scale(0.98);
-        transition: opacity 0.15s ease-out, transform 0.15s ease-out;
-        pointer-events: none; visibility: hidden;
-        background-color: #ffffff;
-        border: 1px solid #e5e7eb;
-        color: #374151;
-        box-sizing: border-box;
-    }
+    .dropdown-window { position: absolute; right: 0; top: calc(100% + 8px); border-radius: 0.5rem; box-shadow: 0 4px 12px rgba(0,0,0,0.1); padding: 0.75rem; z-index: 50; opacity: 0; transform: translateY(-5px) scale(0.98); transition: opacity 0.15s ease-out, transform 0.15s ease-out; pointer-events: none; visibility: hidden; background-color: #ffffff; border: 1px solid #e5e7eb; color: #374151; box-sizing: border-box; }
     .dropdown-window.w-80 { width: 20rem; }
-    .dropdown-window:not(.hidden-dropdown) {
-        opacity: 1; transform: translateY(0) scale(1);
-        pointer-events: auto; visibility: visible;
-    }
+    .dropdown-window:not(.hidden-dropdown) { opacity: 1; transform: translateY(0) scale(1); pointer-events: auto; visibility: visible; }
     .dropdown-title { font-weight: 600; margin-bottom: 0.5rem; font-size: 0.875rem; }
     .dropdown-empty-text { font-size: 0.75rem; text-align: center; padding-top: 1rem; padding-bottom: 1rem;}
     .dropdown-list { list-style-type: disc; list-style-position: inside; margin-top: 0.25rem; font-size: 0.75rem; padding-left: 1rem; }
@@ -779,100 +1003,201 @@
     .dropdown-link { font-size: 0.75rem; color: #2563eb; margin-top: 0.5rem; display: block; }
     .dropdown-link:hover { text-decoration: underline; }
     .dropdown-user-welcome { font-size: 0.75rem; margin-bottom: 0.5rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;}
-    .profile-dropdown-button.logout-action-button { /* Applied to button inside form */
-        background-color: #fee2e2; color: #b91c1c;
-        font-size: 0.75rem; padding: 0.375rem 0.5rem; border-radius: 0.25rem;
-        width: 100%; text-align: left;
-        transition: background-color 150ms; border: none; cursor: pointer;
-        font-family: inherit;
-    }
+    .profile-dropdown-button.logout-action-button { background-color: #fee2e2; color: #b91c1c; font-size: 0.75rem; padding: 0.375rem 0.5rem; border-radius: 0.25rem; width: 100%; text-align: left; transition: background-color 150ms; border: none; cursor: pointer; font-family: inherit; }
     .profile-dropdown-button.logout-action-button:hover { background-color: #fecaca; }
-
-    .main-content-wrapper {
-        flex: 1;
-        display: flex;
-        flex-direction: column;
-        overflow: hidden;
-    }
-
-    /* Main Content Area for Kanban Board itself */
-    .main-content-kanban {
-        padding-top: 60px; /* Fixed header height */
-        flex-grow: 1; display: flex; flex-direction: column;
-        overflow: hidden; box-sizing: border-box;
-        background-color: var(--bg-light);
-        color: var(--text-light-primary);
-    }
+    .main-content-wrapper { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+    .main-content-kanban { padding-top: 60px; flex-grow: 1; display: flex; flex-direction: column; overflow: hidden; box-sizing: border-box; background-color: var(--bg-light); color: var(--text-light-primary); }
     .board-header-kanban { display: flex; align-items: center; padding: 10px 1rem; flex-shrink: 0; box-sizing: border-box; }
     .board-title-kanban { font-size: 1.25rem; font-weight: 700; color: inherit; margin: 0; }
-
-
-    /* === DARK MODE STYLES === */
     :global(body.dark) .page-wrapper { color: #d1d5db; background-color: var(--bg-dark); }
     :global(body.dark) .sidebar-container { background-color: #1f2937; border-right-color: #374151; color: #d1d5db; }
-    :global(body.dark) .sidebar-header { border-bottom-color: #374151; }
-    :global(body.dark) .sidebar-title { color: #f3f4f6; }
-    :global(body.dark) .nav-link { color: #d1d5db; }
-    :global(body.dark) .nav-link:hover { background-color: #374151; }
+    :global(body.dark) .sidebar-header { border-bottom-color: #374151; } :global(body.dark) .sidebar-title { color: #f3f4f6; }
+    :global(body.dark) .nav-link { color: #d1d5db; } :global(body.dark) .nav-link:hover { background-color: #374151; }
     :global(body.dark) .nav-link.active { background-color: #1e40af; }
-    :global(body.dark) .logout-button { color: #d1d5db; }
-    :global(body.dark) .logout-button:hover { background-color: #374151; }
-
+    :global(body.dark) .logout-button { color: #d1d5db; } :global(body.dark) .logout-button:hover { background-color: #374151; }
     :global(body.dark) .top-header { background-color: #1f2937; border-bottom-color: #374151; color: #d1d5db; }
     :global(body.dark) .top-header .logo .top-header-logo-text { color: #f3f4f6; }
     :global(body.dark) .top-header .menu-btn:hover { background-color: #374151; }
     :global(body.dark) .top-header .header-icons .header-icon-btn:hover { background-color: #374151; }
-    :global(body.dark) .darkmode-toggle-button { color: #d1d5db; }
-    :global(body.dark) .darkmode-toggle-button:hover { background-color: #374151; }
-
+    :global(body.dark) .darkmode-toggle-button { color: #d1d5db; } :global(body.dark) .darkmode-toggle-button:hover { background-color: #374151; }
     :global(body.dark) .dropdown-window { background-color: #374151; border-color: #4b5563; color: #f3f4f6; }
     :global(body.dark) .dropdown-link { color: #60a5fa; }
     :global(body.dark) .profile-dropdown-button.logout-action-button { background-color: #7f1d1d; color: #fca5a5; }
     :global(body.dark) .profile-dropdown-button.logout-action-button:hover { background-color: #991b1b; }
-
     :global(body.dark) .main-content-kanban { background-color: var(--bg-dark); color: var(--text-dark-primary); }
 
+    .modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.6);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1050; /* Higher than sidebar and header */
+    padding: 1rem;
+    box-sizing: border-box;
+}
 
-    /* --- KANBAN BOARD SPECIFIC STYLES (Themed with CSS Variables) --- */
+.modal-content {
+    background-color: var(--surface-light);
+    color: var(--text-light-primary);
+    padding: 1.5rem 2rem;
+    border-radius: 8px;
+    box-shadow: 0 5px 15px rgba(0, 0, 0, 0.2);
+    max-width: 450px;
+    width: 100%;
+    text-align: center;
+}
+:global(body.dark) .modal-content {
+    background-color: var(--surface-dark);
+    color: var(--text-dark-primary);
+}
+
+.modal-title {
+    font-size: 1.25rem;
+    font-weight: 600;
+    margin-top: 0;
+    margin-bottom: 0.75rem;
+}
+
+.modal-message {
+    font-size: 0.95rem;
+    margin-bottom: 1.5rem;
+    line-height: 1.6;
+    color: var(--text-light-secondary);
+}
+:global(body.dark) .modal-message {
+    color: var(--text-dark-secondary);
+}
+
+.modal-actions {
+    display: flex;
+    justify-content: flex-end; /* Align buttons to the right */
+    gap: 0.75rem;
+}
+
+.modal-button {
+    padding: 0.6rem 1.2rem;
+    border-radius: 5px;
+    border: none;
+    font-weight: 500;
+    font-size: 0.9rem;
+    cursor: pointer;
+    transition: background-color 0.2s, box-shadow 0.2s;
+}
+
+.modal-button-confirm {
+    background-color: var(--interactive-light);
+    color: white;
+}
+:global(body.dark) .modal-button-confirm {
+    background-color: var(--interactive-dark);
+}
+.modal-button-confirm:hover {
+    background-color: #1d4ed8; /* Darker blue */
+    box-shadow: 0 2px 8px rgba(37, 99, 235, 0.3);
+}
+:global(body.dark) .modal-button-confirm:hover {
+    background-color: #1e3a8a; /* Darker blue for dark mode */
+}
+
+
+.modal-button-cancel {
+    background-color: #e5e7eb; /* Light gray */
+    color: var(--text-light-primary);
+    border: 1px solid #d1d5db;
+}
+:global(body.dark) .modal-button-cancel {
+    background-color: #374151; /* Darker gray */
+    color: var(--text-dark-primary);
+    border-color: #4b5563;
+}
+.modal-button-cancel:hover {
+    background-color: #d1d5db; /* Slightly darker gray */
+}
+:global(body.dark) .modal-button-cancel:hover {
+    background-color: #4b5563; /* Slightly lighter gray for dark mode */
+}
+    /* KANBAN BOARD SPECIFIC STYLES */
     :root {
         --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-        --bg-light: #f3f4f6; --bg-dark: #18181b; /* Main page background */
+        --bg-light: #f3f4f6; --bg-dark: #18181b;
         --text-light-primary: #1f2937; --text-light-secondary: #4b5563;
         --text-dark-primary: #f3f4f6; --text-dark-secondary: #9ca3af;
         --border-light: #e5e7eb; --border-dark: #374151;
-        /* Surface for elements ON the main background (e.g., cards, columns) */
         --surface-light: #ffffff; --surface-dark: #1f2937;
         --interactive-light: #2563eb; --interactive-dark: #1d4ed8;
-        --interactive-hover-light: #f0f4f8;
-        --interactive-hover-dark: #2c3a4f;
+        --interactive-hover-light: #f0f4f8; --interactive-hover-dark: #2c3a4f;
         --priority-high-light: #ef4444; --priority-high-dark: #f87171;
         --priority-medium-light: #f59e0b; --priority-medium-dark: #fbbf24;
         --priority-low-light: #22c55e; --priority-low-dark: #4ade80;
         --priority-standard-light: #3b82f6; --priority-standard-dark: #60a5fa;
+        --status-late-bg: #fee2e2; --status-late-text: #991b1b;
+        --status-incomplete-bg: #fef3c7; --status-incomplete-text: #92400e;
+    }
+    :global(body.dark) {
+        --status-late-bg: #3f2222; --status-late-text: #fca5a5;
+        --status-incomplete-bg: #4a3a1d; --status-incomplete-text: #fde68a;
     }
 
     .kanban-board-scroll-container { flex-grow: 1; overflow-x: auto; overflow-y: hidden; padding: 10px; box-sizing: border-box; }
     .kanban-board { display: inline-flex; gap: 12px; padding-bottom: 10px; min-height: calc(100% - 10px); align-items: flex-start; box-sizing: border-box; }
-
-    .kanban-column { background-color: var(--surface-light); border: 1px solid var(--border-light); border-radius: 8px; width: 280px; flex-shrink: 0; display: flex; flex-direction: column; max-height: calc(100% - 10px); /* Max height relative to scroll container */ padding: 0; box-sizing: border-box; box-shadow: 0 2px 4px rgba(0,0,0,0.04); }
+    .kanban-column { background-color: var(--surface-light); border: 1px solid var(--border-light); border-radius: 8px; width: 300px; flex-shrink: 0; display: flex; flex-direction: column; max-height: calc(100vh - 60px - 40px - 30px); padding: 0; box-sizing: border-box; box-shadow: 0 2px 4px rgba(0,0,0,0.04); position: relative; /* For pseudo-elements */}
     :global(body.dark) .kanban-column { background-color: var(--surface-dark); border-color: var(--border-dark); box-shadow: 0 2px 4px rgba(0,0,0,0.2); }
-    .kanban-column.drag-over-column { background-color: #e9eff1; }
-    :global(body.dark) .kanban-column.drag-over-column { background-color: #2a3b4d; }
+    
+    .kanban-column.dragging-column {
+        opacity: 0.8;
+        box-shadow: 0 10px 20px rgba(0,0,0,0.15);
+        /* transform is handled by JS for animation */
+        /* transition: transform 0.1s ease-out; NOT NEEDED as JS handles pos */
+        pointer-events: none; /* Helps prevent unwanted interactions with content during fixed positioning */
+    }
+    :global(body.dark) .kanban-column.dragging-column {
+        box-shadow: 0 10px 20px rgba(0,0,0,0.4);
+    }
 
-    .kanban-column.dragging-column { opacity: 0.9; border: 2px solid var(--interactive-light); background-color: var(--surface-light); box-shadow: 0 10px 20px rgba(0,0,0,0.1), 0 6px 6px rgba(0,0,0,0.1); pointer-events: none; transition: opacity 0.2s ease; }
-    :global(body.dark) .kanban-column.dragging-column { border-color: var(--interactive-dark); background-color: var(--surface-dark); }
+    /* Visual indicators for column drop zones with smooth transition */
+    .kanban-column::before,
+    .kanban-column::after {
+        content: '';
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        width: 0; /* Start with 0 width */
+        opacity: 0; /* Start invisible */
+        background-color: var(--interactive-light);
+        z-index: 5; /* Lower than dragged column if it's fixed */
+        border-radius: 3px;
+        pointer-events: none;
+        transition: width 0.2s ease-out, opacity 0.2s ease-out, background-color 0.15s ease;
+    }
+    :global(body.dark) .kanban-column::before,
+    :global(body.dark) .kanban-column::after {
+        background-color: var(--interactive-dark);
+    }
 
-    .column-drop-placeholder { width: 280px; min-height: 100px; border: 2px dashed var(--border-light); background-color: rgba(0,0,0,0.02); border-radius: 8px; flex-shrink: 0; box-sizing: border-box; margin: 0 4px; }
-    :global(body.dark) .column-drop-placeholder { border-color: var(--border-dark); background-color: rgba(255,255,255,0.02); }
+    .kanban-column.drag-over-column-left::before {
+        left: -3px;
+        width: 6px; /* Expand width */
+        opacity: 1; /* Become visible */
+    }
 
-    .column-header { display: flex; align-items: center; justify-content: space-between; padding: 12px 14px; cursor: grab; box-sizing: border-box; user-select: none; border-bottom: 1px solid var(--border-light); }
+    .kanban-column.drag-over-column-right::after {
+        right: -3px;
+        width: 6px; /* Expand width */
+        opacity: 1; /* Become visible */
+    }
+
+    .column-header { display: flex; align-items: center; justify-content: space-between; padding: 12px 14px; box-sizing: border-box; border-bottom: 1px solid var(--border-light); }
     :global(body.dark) .column-header { border-bottom-color: var(--border-dark); }
     .column-title { font-size: 0.95em; font-weight: 600; color: var(--text-light-primary); margin: 0; flex-grow: 1; padding-right: 5px; }
     :global(body.dark) .column-title { color: var(--text-dark-primary); }
     .column-task-count { font-size: 0.8em; color: var(--text-light-secondary); margin-left: 8px; background-color: var(--bg-light); padding: 2px 6px; border-radius: 4px;}
     :global(body.dark) .column-task-count { color: var(--text-dark-secondary); background-color: var(--bg-dark); }
-
-    .column-options-button { background: transparent; border: none; color: var(--text-light-secondary); padding: 4px; cursor: pointer; border-radius: 999px; line-height: 1; transition: background-color 0.15s ease;}
+    .column-options-button { background: transparent; border: none; color: var(--text-light-secondary); padding: 4px; cursor: pointer; border-radius: 9999px; line-height: 1; transition: background-color 0.15s ease;}
     .column-options-button:hover { background-color: var(--interactive-hover-light); }
     :global(body.dark) .column-options-button { color: var(--text-dark-secondary); }
     :global(body.dark) .column-options-button:hover { background-color: var(--interactive-hover-dark); }
@@ -880,39 +1205,39 @@
     .kanban-column-content { overflow-y: auto; flex-grow: 1; padding: 10px; min-height: 30px; box-sizing: border-box; display: flex; flex-direction: column; gap: 8px; }
     .empty-column-dropzone { flex-grow: 1; min-height: 60px; border: 2px dashed var(--border-light); border-radius: 6px; margin: 0; display: flex; align-items: center; justify-content: center; color: var(--text-light-secondary); font-size: 0.9em; }
     :global(body.dark) .empty-column-dropzone { border-color: var(--border-dark); color: var(--text-dark-secondary); }
-
     .kanban-column-content::-webkit-scrollbar { width: 8px; }
     .kanban-column-content::-webkit-scrollbar-thumb { background-color: #cbd5e1; border-radius: 4px; }
     .kanban-column-content::-webkit-scrollbar-track { background-color: transparent; }
     :global(body.dark) .kanban-column-content::-webkit-scrollbar-thumb { background-color: #475569; }
 
-    .kanban-card { background-color: var(--surface-light); border-radius: 6px; box-shadow: 0 1px 2px rgba(0,0,0,0.06), 0 1px 1px rgba(0,0,0,0.04); padding: 10px 12px; margin-bottom: 0; cursor: grab; word-wrap: break-word; font-size: 14px; color: var(--text-light-primary); position: relative; transition: border-top 0.1s linear, border-bottom 0.1s linear, background-color 0.15s ease; box-sizing: border-box; border-top: 3px solid transparent; border-bottom: 3px solid transparent; border-left: 4px solid transparent; }
+    .kanban-card { background-color: var(--surface-light); border-radius: 6px; box-shadow: 0 1px 2px rgba(0,0,0,0.06), 0 1px 1px rgba(0,0,0,0.04); padding: 10px 12px; margin-bottom: 0; cursor: grab; word-wrap: break-word; font-size: 14px; color: var(--text-light-primary); position: relative; transition: border-top 0.1s linear, border-bottom 0.1s linear, background-color 0.15s ease, opacity 0.2s ease; box-sizing: border-box; border-top: 3px solid transparent; border-bottom: 3px solid transparent; border-left: 4px solid transparent; }
     :global(body.dark) .kanban-card { background-color: var(--surface-dark); color: var(--text-dark-primary); box-shadow: 0 1px 2px rgba(0,0,0,0.2), 0 1px 1px rgba(0,0,0,0.2); }
     .kanban-card:hover:not(.dragging-card) { background-color: #f8fafc; }
     :global(body.dark) .kanban-card:hover:not(.dragging-card) { background-color: #334155; }
-
-    .kanban-card.dragging-card { opacity: 0.85; box-shadow: 0 8px 16px rgba(0,0,0,0.12); border-color: transparent !important; pointer-events: none; transition: opacity 0.2s ease-in-out; }
+    .kanban-card.dragging-card { opacity: 0.85; box-shadow: 0 8px 16px rgba(0,0,0,0.12); border-color: transparent !important; pointer-events: none; }
     :global(body.dark) .kanban-card.dragging-card { box-shadow: 0 8px 16px rgba(0,0,0,0.35); }
-
     .kanban-card.drag-over-card-before { border-top-color: var(--interactive-light); }
     .kanban-card.drag-over-card-after { border-bottom-color: var(--interactive-light); }
     :global(body.dark) .kanban-card.drag-over-card-before { border-top-color: var(--interactive-dark); }
     :global(body.dark) .kanban-card.drag-over-card-after { border-bottom-color: var(--interactive-dark); }
+    
+    .card-labels { display: flex; gap: 4px; margin-bottom: 4px; flex-wrap: wrap; }
+    .card-labels span { font-size: 0.7em; padding: 2px 5px; border-radius: 3px; font-weight: 500; }
+    .label-status-late { background-color: var(--status-late-bg); color: var(--status-late-text); }
+    .label-status-incomplete { background-color: var(--status-incomplete-bg); color: var(--status-incomplete-text); }
 
     .card-title { margin: 0 0 6px 0; font-size: 0.9rem; font-weight: 500; line-height: 1.4; display: block; }
     .card-description-preview { font-size: 0.8rem; color: var(--text-light-secondary); margin-bottom: 8px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; text-overflow: ellipsis; }
     :global(body.dark) .card-description-preview { color: var(--text-dark-secondary); }
-
     .card-footer { display: flex; justify-content: space-between; align-items: center; min-height: 20px; margin-top: 4px; }
     .card-meta-icons { display: flex; align-items: center; gap: 10px; color: var(--text-light-secondary); }
     :global(body.dark) .card-meta-icons { color: var(--text-dark-secondary); }
     .meta-icon { display: flex; align-items: center; gap: 4px; font-size: 0.75em; }
     .due-date-text { font-size: 0.85em; }
-
     .priority-high { border-left-color: var(--priority-high-light); }
     .priority-medium { border-left-color: var(--priority-medium-light); }
     .priority-low { border-left-color: var(--priority-low-light); }
-    .priority-standard { border-left-color: var(--border-light); }
+    .priority-standard { border-left-color: var(--border-light); } 
     :global(body.dark) .priority-high { border-left-color: var(--priority-high-dark); }
     :global(body.dark) .priority-medium { border-left-color: var(--priority-medium-dark); }
     :global(body.dark) .priority-low { border-left-color: var(--priority-low-dark); }
@@ -922,11 +1247,90 @@
     .add-card-button:hover { background-color: var(--interactive-hover-light); color: var(--interactive-light); }
     :global(body.dark) .add-card-button { color: var(--text-dark-secondary); }
     :global(body.dark) .add-card-button:hover { background-color: var(--interactive-hover-dark); color: var(--interactive-dark); }
+    .p-4 { padding: 1rem; } .text-red-600 { color: #dc2626; } :global(body.dark) .text-red-600 { color: #f87171; }
+    .text-gray-500 { color: #6b7280; } :global(body.dark) .text-gray-500 { color: #9ca3af; }
+    /* --- ADD TASK MODAL STYLES --- */
+.add-task-modal-content { /* For specific sizing or layout if needed */
+    max-width: 550px;
+    text-align: left; /* Align form elements to the left */
+}
 
-    .add-list-wrapper { background-color: rgba(0,0,0,0.04); border-radius: 8px; width: 280px; flex-shrink: 0; padding: 6px; height: fit-content; box-sizing: border-box; }
-    :global(body.dark) .add-list-wrapper { background-color: rgba(255,255,255,0.04); }
-    .add-list-button { background-color: transparent; border: none; color: var(--text-light-secondary); padding: 8px 10px; border-radius: 6px; text-align: left; width: 100%; cursor: pointer; font-size: 0.9em; box-sizing: border-box; transition: background-color 0.15s ease, color 0.15s ease; display: flex; align-items: center; font-weight: 500; }
-    .add-list-button:hover { background-color: rgba(0,0,0,0.06); color: var(--text-light-primary); }
-    :global(body.dark) .add-list-button { color: var(--text-dark-secondary); }
-    :global(body.dark) .add-list-button:hover { background-color: rgba(255,255,255,0.06); color: var(--text-dark-primary); }
+.form-group {
+    margin-bottom: 1rem;
+}
+.form-group-row {
+    display: flex;
+    gap: 1rem;
+    margin-bottom: 1rem;
+}
+.form-group-row .form-group {
+    flex: 1;
+    margin-bottom: 0;
+}
+
+.form-label {
+    display: block;
+    font-weight: 500;
+    font-size: 0.875rem;
+    margin-bottom: 0.3rem;
+    color: var(--text-light-secondary);
+}
+:global(body.dark) .form-label {
+    color: var(--text-dark-secondary);
+}
+
+.form-input,
+.form-textarea,
+.form-select {
+    width: 100%;
+    padding: 0.6rem 0.75rem;
+    border: 1px solid var(--border-light);
+    border-radius: 5px;
+    background-color: var(--surface-light);
+    color: var(--text-light-primary);
+    font-size: 0.9rem;
+    box-sizing: border-box;
+    transition: border-color 0.2s, box-shadow 0.2s;
+}
+:global(body.dark) .form-input,
+:global(body.dark) .form-textarea,
+:global(body.dark) .form-select {
+    background-color: var(--bg-dark); /* Slightly different from surface-dark for input fields */
+    color: var(--text-dark-primary);
+    border-color: var(--border-dark);
+}
+
+.form-input:focus,
+.form-textarea:focus,
+.form-select:focus {
+    outline: none;
+    border-color: var(--interactive-light);
+    box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.2); /* Focus ring */
+}
+:global(body.dark) .form-input:focus,
+:global(body.dark) .form-textarea:focus,
+:global(body.dark) .form-select:focus {
+    border-color: var(--interactive-dark);
+    box-shadow: 0 0 0 2px rgba(29, 78, 216, 0.3);
+}
+
+.form-textarea {
+    min-height: 80px;
+    resize: vertical;
+}
+
+.form-error-message {
+    background-color: #fee2e2; /* Light red */
+    color: #b91c1c; /* Dark red text */
+    border: 1px solid #fca5a5; /* Red border */
+    padding: 0.75rem 1rem;
+    border-radius: 5px;
+    font-size: 0.875rem;
+    margin-bottom: 1rem;
+}
+:global(body.dark) .form-error-message {
+    background-color: #450a0a; /* Darker red bg */
+    color: #fecaca; /* Light red text */
+    border-color: #7f1d1d; /* Dark red border */
+}
 </style>

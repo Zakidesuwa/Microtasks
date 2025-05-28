@@ -7,20 +7,9 @@
   import { goto, invalidateAll } from '$app/navigation';
   import { browser } from '$app/environment';
   import type { ActionResult } from '@sveltejs/kit';
-
-  // Define TaskForFrontend locally to match server structure
-  interface TaskForFrontend {
-    id: string;
-    title: string;
-    description: string;
-    isCompleted: boolean;
-    status: 'pending' | 'complete' | 'incomplete' | 'late';
-    priority: string | number | null;
-    createdAtISO: string | null;
-    dueDateISO: string | null;
-    dueTime: string | null;
-    color?: string;
-  }
+  import type { TaskForFrontend } from '$lib/types/task'; // Import from types file
+  import TaskPopover from '$lib/components/TaskPopover.svelte'; // Import new popover component
+  import DayTasksModal from '$lib/components/DayTasksModal.svelte'; // Import new modal component
 
   export let data: {
     user?: { name?: string };
@@ -54,8 +43,14 @@
   let eventDueTime: string | null = null;
   let eventColor: string = '#3B82F6';
 
-  let showTaskDetailsModal = false;
+  let showTaskDetailsPopover = false; // Changed from Modal to Popover
   let selectedTaskForDetails: TaskForFrontend | null = null;
+  let popoverX: number = 0; // X coordinate for popover
+  let popoverY: number = 0; // Y coordinate for popover
+
+  let showDayTasksModal = false;
+  let selectedDayTasks: TaskForFrontend[] = [];
+  let selectedDayDate: Date | null = null;
 
   const dropdownIds = ['notifWindow', 'helpWindow', 'profileWindow'];
 
@@ -130,19 +125,43 @@
   function openAddEventForm(dayDateObj?: Date) { showEventForm = true; editingEventId = null; eventTitle = ""; eventDescription = ""; eventFormActionError = null; const dateToUse = dayDateObj || new Date(); eventDate = `${dateToUse.getFullYear()}-${(dateToUse.getMonth() + 1).toString().padStart(2, '0')}-${dateToUse.getDate().toString().padStart(2, '0')}`; eventDueTime = null; eventColor = '#3B82F6'; }
   function closeEventForm() { showEventForm = false; }
   function closeSidebar() { isSidebarOpen = false; }
-  function openTaskDetailsModal(eventId: string) {
-      // Removed specific handling for 'today_thu_evt' as they are removed
+  
+  // Modified to accept eventId and optionally MouseEvent for positioning
+  function openTaskDetailsPopover(eventId: string, event?: MouseEvent) {
       const task = data.tasks.find(t => t.id === eventId);
       if (task) {
           selectedTaskForDetails = task;
-          showTaskDetailsModal = true;
+          if (event) {
+              popoverX = event.clientX;
+              popoverY = event.clientY;
+          } else {
+              // Fallback for keyboard events or if event is not provided
+              // You might want to calculate position based on the element's bounding rect
+              popoverX = window.innerWidth / 2; // Center of the screen as a fallback
+              popoverY = window.innerHeight / 2; // Center of the screen as a fallback
+          }
+          showTaskDetailsPopover = true;
       } else {
-          console.warn(`Task with ID ${eventId} not found for details modal.`);
-          // Optionally, if you still have other types of non-data.tasks events, handle them here.
-          // For now, we assume all clickable events on calendar come from data.tasks
+          console.warn(`Task with ID ${eventId} not found for details popover.`);
       }
   }
-  function closeTaskDetailsModal() { showTaskDetailsModal = false; selectedTaskForDetails = null; }
+  function closeTaskDetailsPopover() { showTaskDetailsPopover = false; selectedTaskForDetails = null; } // Changed from Modal to Popover
+
+  function openDayTasksModal(day: Day) {
+      selectedDayDate = day.date;
+      selectedDayTasks = data.tasks.filter(task => {
+          if (!task.dueDateISO) return false;
+          const [taskYear, taskMonth, taskDay] = task.dueDateISO.split('-').map(Number);
+          return taskYear === day.date.getFullYear() && (taskMonth - 1) === day.date.getMonth() && taskDay === day.date.getDate();
+      });
+      showDayTasksModal = true;
+  }
+  function closeDayTasksModal() {
+      showDayTasksModal = false;
+      selectedDayTasks = [];
+      selectedDayDate = null;
+  }
+
   function toggleWindow(id: string) { const el = document.getElementById(id); if (el) el.classList.toggle('hidden'); }
   function closeOtherWindows(currentId: string) { dropdownIds.forEach(id => { if (id !== currentId) document.getElementById(id)?.classList.add('hidden'); }); }
   function handleLogout() { if (browser) { localStorage.removeItem('microtask_username'); document.cookie = "userId=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/; SameSite=Lax;"; goto('/login'); } }
@@ -169,7 +188,7 @@
   let successMessage: string | null = null;
   let successMessageTimeoutId: number | undefined;
 
-  const handleEscKey = (event: KeyboardEvent) => { if (event.key === 'Escape') { if (showTaskDetailsModal) closeTaskDetailsModal(); else if (showEventForm) closeEventForm(); else if (isSidebarOpen) closeSidebar(); } };
+  const handleEscKey = (event: KeyboardEvent) => { if (event.key === 'Escape') { if (showTaskDetailsPopover) closeTaskDetailsPopover(); else if (showEventForm) closeEventForm(); else if (showDayTasksModal) closeDayTasksModal(); else if (isSidebarOpen) closeSidebar(); } }; // Changed to close popover
 
   $: {
     // console.log('[Calendar Svelte Reactive Block - User/Error] Triggered. Current data.user:', data.user, 'Current username state:', username);
@@ -235,9 +254,43 @@
       if (darkModeButton) darkModeButton.addEventListener('click', toggleDarkMode);
     }
 
-    const handleGlobalClick = (event: MouseEvent) => { const target = event.target as Node | null; const sidebar = document.getElementById('sidebar'); const hamburgerButton = document.getElementById('hamburgerButton'); if (sidebar && !sidebar.contains(target) && hamburgerButton && !hamburgerButton.contains(target) && isSidebarOpen) { closeSidebar(); } let isClickInsideDropdownTrigger = false; const triggerIds = ['bellIcon', 'helpIcon', 'profileIcon']; triggerIds.forEach(triggerId => { const el = document.getElementById(triggerId); if (el && el.contains(target)) isClickInsideDropdownTrigger = true; }); let isClickInsideDropdownWindow = false; dropdownIds.forEach(windowId => { const el = document.getElementById(windowId); if (el && el.contains(target)) isClickInsideDropdownWindow = true; }); if (!isClickInsideDropdownTrigger && !isClickInsideDropdownWindow) closeOtherWindows(''); };
+    const handleGlobalClick = (event: MouseEvent) => {
+        const target = event.target as Node | null;
+        const sidebar = document.getElementById('sidebar');
+        const hamburgerButton = document.getElementById('hamburgerButton');
+        if (sidebar && !sidebar.contains(target) && hamburgerButton && !hamburgerButton.contains(target) && isSidebarOpen) {
+            closeSidebar();
+        }
+        let isClickInsideDropdownTrigger = false;
+        const triggerIds = ['bellIcon', 'helpIcon', 'profileIcon'];
+        triggerIds.forEach(triggerId => {
+            const el = document.getElementById(triggerId);
+            if (el && el.contains(target)) isClickInsideDropdownTrigger = true;
+        });
+        let isClickInsideDropdownWindow = false;
+        dropdownIds.forEach(windowId => {
+            const el = document.getElementById(windowId);
+            if (el && el.contains(target)) isClickInsideDropdownWindow = true;
+        });
+        // Close popover if click is outside and popover is open
+        if (showTaskDetailsPopover) {
+            const popoverElement = document.querySelector('.fixed.z-\\[80\\]'); // Assuming this class identifies the popover
+            if (popoverElement && !popoverElement.contains(target)) {
+                closeTaskDetailsPopover();
+            }
+        }
+        // Close day tasks modal if click is outside and modal is open
+        if (showDayTasksModal) {
+            const dayTasksModalElement = document.querySelector('.fixed.inset-0.z-\\[60\\]'); // Assuming this class identifies the modal
+            if (dayTasksModalElement && !dayTasksModalElement.contains(target)) {
+                closeDayTasksModal();
+            }
+        }
+        if (!isClickInsideDropdownTrigger && !isClickInsideDropdownWindow) closeOtherWindows('');
+    };
     document.addEventListener('click', handleGlobalClick);
-    document.addEventListener('keydown', handleEscKey);
+    // Attach keydown listener with useCapture = true
+    document.addEventListener('keydown', handleEscKey, true);
     const intervalId = setInterval(() => { greeting = getGreeting(); }, 60000);
 
     if (browser && data.tasks) {
@@ -247,7 +300,8 @@
     return () => {
       clearInterval(intervalId);
       document.removeEventListener('click', handleGlobalClick);
-      document.removeEventListener('keydown', handleEscKey);
+      // Remove keydown listener with useCapture = true
+      document.removeEventListener('keydown', handleEscKey, true);
       const bellIcon = document.getElementById('bellIcon'); if (bellIcon) bellIcon.onclick = null;
       const helpIcon = document.getElementById('helpIcon'); if (helpIcon) helpIcon.onclick = null;
       const profileIcon = document.getElementById('profileIcon'); if (profileIcon) profileIcon.onclick = null;
@@ -279,16 +333,16 @@
 
 
     {#if isSidebarOpen}
-    <div
-      id="sidebar"
-      class={`fixed top-0 left-0 h-full w-64 shadow-lg z-50 flex flex-col justify-between p-4 border-r ${isDarkMode ? 'bg-zinc-800 border-zinc-700' : 'bg-white border-gray-200'}`}
-      transition:fly={{ x: -300, duration: 300, easing: quintOut }}
-    >
-      <div>
-        <div class="flex items-center gap-2 mb-8 pb-4 border-b ${isDarkMode ? 'border-zinc-700' : 'border-gray-200'}">
-          <img src="/logonamin.png" alt="Microtask Logo" class="w-8 h-8" />
-          <h1 class={`text-xl font-bold ${isDarkMode ? 'text-zinc-100' : 'text-gray-800'}`}>Microtask</h1>
-        </div>
+<div
+  id="sidebar"
+  class={`fixed top-0 left-0 h-full w-64 shadow-lg z-50 flex flex-col justify-between p-4 border-r ${isDarkMode ? 'bg-zinc-800 border-zinc-700' : 'bg-white border-gray-200'}`}
+  transition:fly={{ x: -300, duration: 300, easing: quintOut }}
+>
+  <div>
+    <div class="flex items-center gap-2 mb-8 pb-4 border-b ${isDarkMode ? 'border-zinc-700' : 'border-gray-200'}">
+      <img src={isDarkMode ? "/logonamindarkmode.png" : "/logonamin.png"} alt="Microtask Logo" class="w-8 h-8" />
+      <h1 class={`text-xl font-bold ${isDarkMode ? 'text-zinc-100' : 'text-gray-800'}`}>Microtask</h1>
+    </div>
         <nav class="flex flex-col gap-2">
           <a href="/home"
              class={`flex items-center gap-3 px-3 py-2 rounded-md font-semibold transition-colors duration-150
@@ -318,7 +372,7 @@
              class={`flex items-center gap-3 px-3 py-2 rounded-md font-semibold transition-colors duration-150
                     ${currentPath === '/tasks' ? (isDarkMode ? 'bg-blue-700 text-white' : 'bg-blue-600 text-white') : (isDarkMode ? 'text-zinc-300 hover:bg-zinc-700' : 'text-gray-700 hover:bg-gray-100')}`}
           >
-            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" class={`w-5 h-5 ${currentPath === '/tasks' ? 'stroke-white' : (isDarkMode ? 'stroke-zinc-300' : 'stroke-gray-700')}`}><path stroke-linecap="round" stroke-linejoin="round" d="M9 12h3.75M9 15h3.75M9 18h3.75m3 .75H18a2.25 2.25 0 0 0 2.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 0 0-1.123-.08m-5.801 0c-.065.21-.1.433-.1.664 0 .414.336.75.75.75h4.5a.75.75 0 0 0 .75-.75 2.25 2.25 0 0 0-.1-.664m-5.8 0A2.251 2.251 0 0 1 13.5 2.25H15c1.012 0 1.867.668 2.15 1.586m-5.8 0c-.376.023-.75.05-1.124.08C9.095 4.01 8.25 4.973 8.25 6.108V8.25m0 0H4.875c-.621 0-1.125.504-1.125 1.125v11.25c0 .621.504 1.125 1.125 1.125h9.75c.621 0 1.125-.504 1.125-1.125V9.375c0-.621-.504-1.125-1.125-1.125H8.25ZM6.75 12h.008v.008H6.75V12Zm0 3h.008v.008H6.75V15Zm0 3h.008v.008H6.75V18Z" /></svg>
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" class={`w-5 h-5 ${currentPath === '/tasks' ? 'stroke-white' : (isDarkMode ? 'stroke-zinc-300' : 'stroke-gray-700')}`}><path stroke-linecap="round" stroke-linejoin="round" d="M9 12h3.75M9 15h3.75M9 18h3.75m3 .75H18a2.25 2.25 0 0 0 2.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 0 0-1.123-.08m-5.801 0c-.065.21-.1.433-.1.664 0 .414.336.75.75.75h4.5a.75.75 0 00.75-.75 2.25 2.25 0 00-.1-.664m-5.8 0A2.251 2.251 0 0 1 13.5 2.25H15c1.012 0 1.867.668 2.15 1.586m-5.8 0c-.376.023-.75.05-1.124.08C9.095 4.01 8.25 4.973 8.25 6.108V8.25m0 0H4.875c-.621 0-1.125.504-1.125 1.125v11.25c0 .621.504 1.125 1.125 1.125h9.75c.621 0 1.125-.504 1.125-1.125V9.375c0-.621-.504-1.125-1.125-1.125H8.25ZM6.75 12h.008v.008H6.75V12Zm0 3h.008v.008H6.75V15Zm0 3h.008v.008H6.75V18Z" /></svg>
             <span>All Tasks</span>
           </a>
           <a href="/calendar"
@@ -355,16 +409,16 @@
   {/if}
 
   <div class="flex-1 flex flex-col overflow-hidden">
-    <header class={`top-header ${isDarkMode ? 'bg-zinc-800 border-zinc-700' : 'bg-white border-gray-200'}`}>
-      <div class="header-left">
-        <button id="hamburgerButton" class="menu-btn" on:click={toggleSidebar} aria-label="Toggle Sidebar">
-          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-6 h-6"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" /></svg>
-        </button>
-        <a href="/home" class="logo">
-          <img src="/logonamin.png" alt="Microtask Logo" class="h-8 w-auto">
-          <span class={`${isDarkMode ? 'text-zinc-100' : 'text-gray-800'}`}>Microtask</span>
-        </a>
-      </div>
+  <header class={`top-header ${isDarkMode ? 'bg-zinc-800 border-zinc-700' : 'bg-white border-gray-200'}`}>
+    <div class="header-left">
+      <button id="hamburgerButton" class="menu-btn" on:click={toggleSidebar} aria-label="Toggle Sidebar">
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-6 h-6"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" /></svg>
+      </button>
+      <a href="/home" class="logo">
+        <img src={isDarkMode ? "/logonamindarkmode.png" : "/logonamin.png"} alt="Microtask Logo" class="h-8 w-auto">
+        <span class={`${isDarkMode ? 'text-zinc-100' : 'text-gray-800'}`}>Microtask</span>
+      </a>
+    </div>
       <div class="header-icons">
         <div class="relative">
           <button id="bellIcon" aria-label="Notifications" class="relative">
@@ -394,14 +448,14 @@
         </div>
         <button id="darkModeToggle" aria-label="Toggle Dark Mode" class={`ml-2 p-1.5 rounded-full transition-colors duration-150 ${isDarkMode ? 'hover:bg-zinc-700 text-zinc-300' : 'hover:bg-gray-100 text-gray-700'}`}>
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-5 h-5">
-            {#if isDarkMode} <path fill-rule="evenodd" d="M9.528 1.718a.75.75 0 0 0-.103.103l1.132 1.132a.75.75 0 0 0 1.06 0l1.132-1.132a.75.75 0 0 0-.103-1.06l-1.132-1.132a.75.75 0 0 0-1.06 0L9.63 1.615a.75.75 0 0 0-.102.103ZM12 3.75a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0v-1.5a.75.75 0 0 1 .75-.75ZM18.282 5.282a.75.75 0 0 0-1.06 0l-1.132 1.132a.75.75 0 0 0 .103 1.06l1.132 1.132a.75.75 0 0 0 1.06 0l1.132-1.132a.75.75 0 0 0-.103-1.06l-1.132-1.132a.75.75 0 000-.103ZM19.5 12a.75.75 0 01-.75.75h-1.5a.75.75 0 010-1.5h1.5a.75.75 0 01.75.75ZM18.282 18.718a.75.75 0 000 1.06l1.132 1.132a.75.75 0 001.06 0l1.132-1.132a.75.75 0 00-.103-1.06l-1.132-1.132a.75.75 0 00-1.06 0l-1.132 1.132a.75.75 0 00.103.103ZM12 18.75a.75.75 0 01-.75.75h-1.5a.75.75 0 010-1.5h1.5a.75.75 0 01.75.75ZM5.718 18.718a.75.75 0 001.06 0l1.132-1.132a.75.75 0 00-.103-1.06l-1.132-1.132a.75.75 0 00-1.06 0L4.586 17.686a.75.75 0 00.103 1.06l1.132 1.132a.75.75 0 000-.103ZM4.5 12a.75.75 0 01.75-.75h1.5a.75.75 0 010 1.5h-1.5a.75.75 0 01-.75-.75ZM5.718 5.282a.75.75 0 000-1.06l-1.132-1.132a.75.75 0 00-1.06 0L2.39 4.114a.75.75 0 00.103 1.06l1.132 1.132a.75.75 0 001.06 0l1.132-1.132a.75.75 0 00-.103-.103ZM12 6.75a5.25 5.25 0 015.25 5.25 5.25 5.25 0 01-5.25 5.25 5.25 5.25 0 01-5.25-5.25 5.25 5.25 0 015.25-5.25Z" clip-rule="evenodd" />
+            {#if isDarkMode} <path fill-rule="evenodd" d="M9.528 1.718a.75.75 0 0 0-.103.103l1.132 1.132a.75.75 0 0 0 1.06 0l1.132-1.132a.75.75 0 0 0-.103-1.06l-1.132-1.132a.75.75 0 0 0-1.06 0L9.63 1.615a.75.75 0 00-.102.103ZM12 3.75a.75.75 0 01.75.75v1.5a.75.75 0 01-1.5 0v-1.5a.75.75 0 01.75-.75ZM18.282 5.282a.75.75 0 00-1.06 0l-1.132 1.132a.75.75 0 00.103 1.06l1.132 1.132a.75.75 0 001.06 0l1.132-1.132a.75.75 0 00-.103-1.06l-1.132-1.132a.75.75 0 000-.103ZM19.5 12a.75.75 0 01-.75.75h-1.5a.75.75 0 010-1.5h1.5a.75.75 0 01.75.75ZM18.282 18.718a.75.75 0 000 1.06l1.132 1.132a.75.75 0 001.06 0l1.132-1.132a.75.75 0 00-.103-1.06l-1.132-1.132a.75.75 0 00-1.06 0l-1.132 1.132a.75.75 0 00.103.103ZM12 18.75a.75.75 0 01-.75.75h-1.5a.75.75 0 010-1.5h1.5a.75.75 0 01.75.75ZM5.718 18.718a.75.75 0 001.06 0l1.132-1.132a.75.75 0 00-.103-1.06l-1.132-1.132a.75.75 0 00-1.06 0L4.586 17.686a.75.75 0 00.103 1.06l1.132 1.132a.75.75 0 000-.103ZM4.5 12a.75.75 0 01.75-.75h1.5a.75.75 0 010 1.5h-1.5a.75.75 0 01-.75-.75ZM5.718 5.282a.75.75 0 000-1.06l-1.132-1.132a.75.75 0 00-1.06 0L2.39 4.114a.75.75 0 00.103 1.06l1.132 1.132a.75.75 0 001.06 0l1.132-1.132a.75.75 0 00-.103-.103ZM12 6.75a5.25 5.25 0 015.25 5.25 5.25 5.25 0 01-5.25 5.25 5.25 5.25 0 01-5.25-5.25 5.25 5.25 0 015.25-5.25Z" clip-rule="evenodd" />
             {:else} <path fill-rule="evenodd" d="M10.5 3.75a6.75 6.75 0 1 0 0 13.5 6.75 6.75 0 0 0 0-13.5ZM12 16.5a4.5 4.5 0 1 1 0-9 4.5 4.5 0 010 9Z" clip-rule="evenodd" /> {/if}
           </svg>
         </button>
       </div>
     </header>
 
-    <div class="flex-1 overflow-y-auto pt-[60px] pb-4 flex flex-col">
+    <div class="flex-1 flex flex-col overflow-hidden">
        
         
         <div class="px-4 sm:px-6 mt-4">
@@ -422,9 +476,9 @@
             <div class="grid grid-cols-7 gap-px">
                 {#if isLoadingCalendar && daysInMonth.length === 0} <div class="col-span-7 text-center py-10 flex justify-center items-center min-h-[300px]"><svg class={`animate-spin h-8 w-8 ${isDarkMode ? 'text-blue-400' : 'text-blue-600'}`} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg></div>
                 {:else if daysInMonth.length > 0}
-                    {#each daysInMonth as day (day.date.toISOString() + '-' + day.dayNum + '-' + day.events.map(e=>e.id + (e.deadlineTime || '')).join('-'))} <div class={`p-1 sm:p-1.5 border min-h-[5rem] sm:min-h-[7rem] flex flex-col transition-colors duration-150 cursor-pointer relative group ${!day.isCurrentMonth ? (isDarkMode ? 'bg-zinc-850 border-zinc-750 text-zinc-600' : 'bg-gray-50 border-gray-100 text-gray-400') : (isDarkMode ? 'bg-zinc-750 border-zinc-700 hover:bg-zinc-700' : 'bg-white border-gray-200 hover:bg-gray-50')} ${day.isToday && day.isCurrentMonth ? (isDarkMode ? '!border-blue-500 ring-1 ring-blue-500 !bg-zinc-700' : '!border-blue-500 ring-1 ring-blue-500 !bg-blue-50') : ''}`} role="gridcell" aria-label={`Date ${day.date.toLocaleDateString()}${day.events.length ? ', ' + day.events.length + ' event' + (day.events.length > 1 ? 's' : '') : ''}`} on:click={() => openAddEventForm(day.date)} tabindex="0" on:keydown={(e) => { if (e.key === 'Enter' || e.key === ' ') openAddEventForm(day.date); }}>
+                    {#each daysInMonth as day (day.date.toISOString() + '-' + day.dayNum + '-' + day.events.map(e=>e.id + (e.deadlineTime || '')).join('-'))} <div class={`p-1 sm:p-1.5 border min-h-[5rem] sm:min-h-[7rem] flex flex-col transition-colors duration-150 cursor-pointer relative group ${!day.isCurrentMonth ? (isDarkMode ? 'bg-zinc-850 border-zinc-750 text-zinc-600' : 'bg-gray-50 border-gray-100 text-gray-400') : (isDarkMode ? 'bg-zinc-750 border-zinc-700 hover:bg-zinc-700' : 'bg-white border-gray-200 hover:bg-gray-50')} ${day.isToday && day.isCurrentMonth ? (isDarkMode ? '!border-blue-500 ring-1 ring-blue-500 !bg-zinc-700' : '!border-blue-500 ring-1 ring-blue-500 !bg-blue-50') : ''}`} role="gridcell" aria-label={`Date ${day.date.toLocaleDateString()}${day.events.length ? ', ' + day.events.length + ' event' + (day.events.length > 1 ? 's' : '') : ''}`} on:click={() => openDayTasksModal(day)} tabindex="0" on:keydown={(e) => { if (e.key === 'Enter' || e.key === ' ') openDayTasksModal(day); }}>
                             <span class={`text-xs sm:text-sm font-semibold mb-0.5 ${day.isToday && day.isCurrentMonth ? (isDarkMode ? 'text-blue-300' : 'text-blue-600') : ''} ${!day.isCurrentMonth ? 'opacity-60' : ''}`}>{day.dayNum}</span>
-                            {#if day.isCurrentMonth && day.events.length > 0} {@const maxEventsToShow = day.events.length > 2 ? 1 : 2} <ul class="mt-0.5 text-[0.6rem] sm:text-[0.7rem] space-y-0.5 overflow-hidden flex-grow"> {#each day.events.slice(0, maxEventsToShow) as event (event.id)} <li class={`truncate p-0.5 sm:px-1 sm:py-0.5 rounded text-white leading-tight cursor-pointer hover:opacity-80 transition-opacity`} style="background-color: {event.color || (isDarkMode ? '#374151' : '#9CA3AF')};" on:click|stopPropagation={() => openTaskDetailsModal(event.id)} on:keydown|stopPropagation={(e) => { if (e.key === 'Enter' || e.key === ' ') openTaskDetailsModal(event.id); }} tabindex="0" role="button" aria-label={`View details for ${event.title}`} title={event.title + (event.deadlineTime ? ` (DL: ${event.deadlineTime})` : '')}> {event.title} {#if event.deadlineTime}<span class="block text-[0.55rem] sm:text-[0.6rem] opacity-80">DL: {event.deadlineTime}</span>{/if} </li> {/each} {#if day.events.length > maxEventsToShow}<li class={`italic text-[0.55rem] sm:text-[0.65rem] mt-0.5 ${isDarkMode ? 'text-zinc-400' : 'text-gray-500'}`}>+{day.events.length - maxEventsToShow} more</li>{/if} </ul> {/if}
+                            {#if day.isCurrentMonth && day.events.length > 0} {@const maxEventsToShow = day.events.length > 2 ? 1 : 2} <ul class="mt-0.5 text-[0.6rem] sm:text-[0.7rem] space-y-0.5 overflow-hidden flex-grow"> {#each day.events.slice(0, maxEventsToShow) as event (event.id)} <li class={`truncate p-0.5 sm:px-1 sm:py-0.5 rounded text-white leading-tight cursor-pointer hover:opacity-80 transition-opacity`} style="background-color: {event.color || (isDarkMode ? '#374151' : '#9CA3AF')};" on:click|stopPropagation={(e) => openTaskDetailsPopover(event.id, e)} on:keydown|stopPropagation={(e) => { if (e.key === 'Enter' || e.key === ' ') openTaskDetailsPopover(event.id); }} tabindex="0" role="button" aria-label={`View details for ${event.title}`} title={event.title + (event.deadlineTime ? ` (DL: ${event.deadlineTime})` : '')}> {event.title} {#if event.deadlineTime}<span class="block text-[0.55rem] sm:text-[0.6rem] opacity-80">DL: {event.deadlineTime}</span>{/if} </li> {/each} {#if day.events.length > maxEventsToShow}<li class={`italic text-[0.55rem] sm:text-[0.65rem] mt-0.5 ${isDarkMode ? 'text-zinc-400' : 'text-gray-500'}`}>+{day.events.length - maxEventsToShow} more</li>{/if} </ul> {/if}
                              <button on:click|stopPropagation={() => openAddEventForm(day.date)} class={`absolute bottom-1 right-1 p-0.5 sm:p-1 rounded-full opacity-0 group-hover:opacity-100 transition-opacity duration-150 focus:opacity-100 ${isDarkMode ? 'bg-blue-600 hover:bg-blue-500 text-white' : 'bg-blue-500 hover:bg-blue-600 text-white'}`} aria-label="Add event to this day"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-2.5 h-2.5 sm:w-3 sm:h-3"><path d="M10.75 4.75a.75.75 0 00-1.5 0v4.5h-4.5a.75.75 0 000 1.5h4.5v4.5a.75.75 0 001.5 0v-4.5h4.5a.75.75 0 000-1.5h-4.5v-4.5z" /></svg></button>
                         </div>
                     {/each}
@@ -437,7 +491,27 @@
   </div>
 
   {#if showEventForm} <div class="fixed inset-0 z-[60] flex items-center justify-center bg-black bg-opacity-50 p-4 backdrop-blur-sm" on:click|self={closeEventForm} transition:fade={{ duration: 150 }}> <div class={`rounded-lg shadow-xl w-full max-w-lg max-h-[90vh] flex flex-col overflow-hidden ${isDarkMode ? 'bg-zinc-800 text-zinc-300' : 'bg-white text-gray-800'}`} role="dialog" aria-modal="true" aria-labelledby="event-modal-title" on:click|stopPropagation transition:scale={{ duration: 200, start: 0.95, opacity: 0.5 }}> <div class={`flex justify-between items-center p-4 sm:p-5 border-b flex-shrink-0 ${isDarkMode ? 'border-zinc-700' : 'border-gray-200'}`}> <h3 id="event-modal-title" class="text-lg sm:text-xl font-semibold">{editingEventId ? 'Edit Event' : 'Add Event'}</h3> <button type="button" class={`p-1 rounded-full focus:outline-none focus:ring-2 focus:ring-offset-2 transition-colors duration-150 ${isDarkMode ? 'text-zinc-400 hover:bg-zinc-700 focus:ring-zinc-600' : 'text-gray-400 hover:bg-gray-100 hover:text-gray-600 focus:ring-gray-400'}`} on:click={closeEventForm} aria-label="Close"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-6 h-6"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12" /></svg></button> </div> <form method="POST" action="?/addEvent" use:enhance={eventFormEnhanceCallback} class={`flex-grow flex flex-col overflow-y-auto p-4 sm:p-5 custom-scrollbar space-y-4`}> {#if editingEventId} <input type="hidden" name="id" value={editingEventId} /> {/if} <div><label for="event-title" class="block text-sm font-medium mb-1">Title <span class="text-red-500">*</span></label><input type="text" id="event-title" name="title" bind:value={eventTitle} class={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-sm ${isDarkMode ? 'bg-zinc-700 border-zinc-600 text-zinc-300 placeholder-zinc-500' : 'border-gray-300 text-gray-800 placeholder-gray-400'}`} required /></div> <div><label for="event-description" class="block text-sm font-medium mb-1">Description (Optional)</label><textarea id="event-description" name="description" bind:value={eventDescription} class={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-sm min-h-[80px] ${isDarkMode ? 'bg-zinc-700 border-zinc-600 text-zinc-300 placeholder-zinc-500' : 'border-gray-300 text-gray-800 placeholder-gray-400'}`} ></textarea></div> <div class="grid grid-cols-1 sm:grid-cols-2 gap-4"><div><label for="event-date" class="block text-sm font-medium mb-1">Date <span class="text-red-500">*</span></label><input type="date" id="event-date" name="eventDate" bind:value={eventDate} class={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-sm ${isDarkMode ? 'bg-zinc-700 border-zinc-600 text-zinc-300 calendar-picker-dark' : 'border-gray-300 text-gray-800'}`} required /></div><div><label for="event-color" class="block text-sm font-medium mb-1">Color</label><input type="color" id="event-color" name="color" bind:value={eventColor} class={`w-full h-10 px-1 py-1 border rounded-md shadow-sm cursor-pointer ${isDarkMode ? 'bg-zinc-700 border-zinc-600' : 'border-gray-300'}`} /></div></div> <div class="grid grid-cols-1 sm:grid-cols-1 gap-4"><div><label for="event-due-time" class="block text-sm font-medium mb-1">Deadline Time (Optional)</label><input type="time" id="event-due-time" name="dueTime" bind:value={eventDueTime} class={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-sm ${isDarkMode ? 'bg-zinc-700 border-zinc-600 text-zinc-300 calendar-picker-dark' : 'border-gray-300 text-gray-800'}`} /></div></div> {#if eventFormActionError}<div class="bg-red-100 border border-red-400 text-red-700 px-4 py-2 rounded-md text-sm" role="alert">{eventFormActionError}</div>{/if} <div class={`flex flex-col sm:flex-row justify-end gap-3 mt-auto pt-4 border-t -mx-4 -mb-4 sm:-mx-5 sm:-mb-5 px-4 py-3 sm:px-5 sm:py-3 rounded-b-lg flex-shrink-0 ${isDarkMode ? 'bg-zinc-700 border-zinc-600' : 'bg-gray-50 border-gray-200'}`}><button type="button" class={`w-full sm:w-auto px-4 py-2 rounded-md focus:outline-none focus:ring-2 focus:ring-offset-2 transition-colors duration-150 ${isDarkMode ? 'bg-zinc-600 text-zinc-300 hover:bg-zinc-500 focus:ring-zinc-500' : 'bg-gray-200 text-gray-800 hover:bg-gray-300 focus:ring-gray-400'}`} on:click={closeEventForm}>Cancel</button><button type="submit" class="w-full sm:w-auto px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-colors duration-150">{editingEventId ? 'Update Event' : 'Add Event'}</button> </div> </form> </div> </div> {/if}
-  {#if showTaskDetailsModal && selectedTaskForDetails} <div class="fixed inset-0 z-[70] flex items-center justify-center bg-black bg-opacity-50 p-4 backdrop-blur-sm" on:click|self={closeTaskDetailsModal} transition:fade={{ duration: 150 }} role="dialog" aria-modal="true" aria-labelledby="task-details-title"> <div class={`rounded-lg shadow-xl w-full max-w-md max-h-[90vh] flex flex-col overflow-hidden ${isDarkMode ? 'bg-zinc-800 text-zinc-300' : 'bg-white text-gray-800'}`} on:click|stopPropagation transition:scale={{ duration: 200, start: 0.95, opacity: 0.5 }}> <div class={`flex justify-between items-center p-4 sm:p-5 border-b flex-shrink-0 ${isDarkMode ? 'border-zinc-700' : 'border-gray-200'}`}> <h3 id="task-details-title" class="text-lg sm:text-xl font-semibold">Task Details</h3> <button type="button" class={`p-1 rounded-full focus:outline-none focus:ring-2 focus:ring-offset-2 transition-colors duration-150 ${isDarkMode ? 'text-zinc-400 hover:bg-zinc-700 focus:ring-zinc-600' : 'text-gray-400 hover:bg-gray-100 hover:text-gray-600 focus:ring-gray-400'}`} on:click={closeTaskDetailsModal} aria-label="Close task details"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-6 h-6"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12" /></svg></button> </div> <div class="flex-grow overflow-y-auto p-4 sm:p-5 space-y-3 custom-scrollbar"> <div class="flex items-center mb-2"><span class="w-4 h-4 rounded-full mr-2 flex-shrink-0" style="background-color: {selectedTaskForDetails.color || '#3B82F6'};"></span><h4 class="text-xl font-semibold break-words" style="color: {selectedTaskForDetails.color || (isDarkMode ? '#E5E7EB' : '#1F2937')};">{selectedTaskForDetails.title}</h4></div> {#if selectedTaskForDetails.description}<div><p class={`text-sm font-medium mb-0.5 ${isDarkMode ? 'text-zinc-200' : 'text-gray-700'}`}>Description:</p><p class={`text-sm whitespace-pre-wrap p-2 rounded ${isDarkMode ? 'text-zinc-400 bg-zinc-700' : 'text-gray-600 bg-gray-50'}`}>{selectedTaskForDetails.description}</p></div>{/if} <div class="grid grid-cols-1 sm:grid-cols-2 gap-3"><div><p class={`text-xs font-medium mb-0.5 ${isDarkMode ? 'text-zinc-300' : 'text-gray-500'}`}>DUE DATE</p><p class={`text-sm ${isDarkMode ? 'text-zinc-100' : 'text-gray-700'}`}>{selectedTaskForDetails.dueDateISO ? new Date(selectedTaskForDetails.dueDateISO + 'T00:00:00Z').toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric', timeZone: 'UTC' }) : 'Not set'}</p></div> {#if selectedTaskForDetails.dueTime}<div><p class={`text-xs font-medium mb-0.5 ${isDarkMode ? 'text-zinc-300' : 'text-gray-500'}`}>DEADLINE TIME</p><p class={`text-sm ${isDarkMode ? 'text-zinc-100' : 'text-gray-700'}`}>{selectedTaskForDetails.dueTime}</p></div>{/if}</div> <div class="grid grid-cols-1 sm:grid-cols-2 gap-3"><div><p class={`text-xs font-medium mb-0.5 ${isDarkMode ? 'text-zinc-300' : 'text-gray-500'}`}>STATUS</p><span class={`px-2 py-0.5 text-xs font-semibold rounded-full inline-block ${selectedTaskForDetails.status === 'complete' ? (isDarkMode ? 'bg-green-700 text-green-200' : 'bg-green-100 text-green-800') : selectedTaskForDetails.status === 'pending' ? (isDarkMode ? 'bg-yellow-700 text-yellow-200' : 'bg-yellow-100 text-yellow-800') : selectedTaskForDetails.status === 'incomplete' ? (isDarkMode ? 'bg-red-700 text-red-200' : 'bg-red-100 text-red-800') : selectedTaskForDetails.status === 'late' ? (isDarkMode ? 'bg-orange-600 text-orange-100' : 'bg-orange-100 text-orange-700') : (isDarkMode ? 'bg-zinc-600 text-zinc-300' : 'bg-gray-200 text-gray-700') }`}>{selectedTaskForDetails.status.charAt(0).toUpperCase() + selectedTaskForDetails.status.slice(1)}</span></div> {#if selectedTaskForDetails.priority}<div><p class={`text-xs font-medium mb-0.5 ${isDarkMode ? 'text-zinc-300' : 'text-gray-500'}`}>PRIORITY</p><p class={`text-sm ${isDarkMode ? 'text-zinc-100' : 'text-gray-700'}`}>{typeof selectedTaskForDetails.priority === 'string' ? selectedTaskForDetails.priority.charAt(0).toUpperCase() + selectedTaskForDetails.priority.slice(1) : selectedTaskForDetails.priority}</p></div>{/if}</div> {#if selectedTaskForDetails.createdAtISO}<div><p class={`text-xs font-medium mb-0.5 ${isDarkMode ? 'text-zinc-300' : 'text-gray-500'}`}>CREATED</p><p class={`text-sm ${isDarkMode ? 'text-zinc-400' : 'text-gray-600'}`}>{new Date(selectedTaskForDetails.createdAtISO).toLocaleString(undefined, {dateStyle: 'medium', timeStyle: 'short'})}</p></div>{/if}</div> <div class={`flex justify-end p-4 sm:p-5 border-t flex-shrink-0 ${isDarkMode ? 'bg-zinc-750 border-zinc-700' : 'bg-gray-50 border-gray-200'}`}><button type="button" class={`w-full sm:w-auto px-4 py-2 rounded-md focus:outline-none focus:ring-2 focus:ring-offset-2 transition-colors duration-150 ${isDarkMode ? 'bg-zinc-600 text-zinc-300 hover:bg-zinc-500 focus:ring-zinc-500' : 'bg-gray-200 text-gray-800 hover:bg-gray-300 focus:ring-gray-400'}`} on:click={closeTaskDetailsModal}>Close</button></div> </div> </div> {/if}
+  
+  <!-- Task Popover Component -->
+  <TaskPopover
+    isOpen={showTaskDetailsPopover}
+    task={selectedTaskForDetails}
+    x={popoverX}
+    y={popoverY}
+    on:close={closeTaskDetailsPopover}
+  />
+
+  <!-- Day Tasks Modal Component -->
+  <DayTasksModal
+    bind:isOpen={showDayTasksModal}
+    tasks={selectedDayTasks}
+    date={selectedDayDate}
+    on:close={closeDayTasksModal}
+    on:detailTask={(e) => {
+      // closeDayTasksModal(); // Removed: Do not close the day tasks modal when opening task details
+      openTaskDetailsPopover(e.detail.task.id, e.detail.event);
+    }}
+  />
 </div>
 
 <style>
