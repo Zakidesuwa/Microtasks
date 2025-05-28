@@ -1,12 +1,12 @@
 <script lang="ts">
-	import { onMount, onDestroy } from 'svelte';
+	import { onMount, onDestroy, tick } from 'svelte';
 	import { page } from '$app/stores';
 	import { browser } from '$app/environment';
     import { fly } from 'svelte/transition';
     import { quintOut } from 'svelte/easing';
     import { enhance } from '$app/forms';
     import type { SubmitFunction, ActionResult } from '@sveltejs/kit';
-    import { invalidateAll } from '$app/navigation';
+    import { goto, invalidateAll } from '$app/navigation';
     import TaskDetailModal from '$lib/components/TaskDetailModal.svelte';
     import LoadingIndicator from '$lib/components/LoadingIndicator.svelte';
     import type { TaskForFrontend } from '$lib/types/task';
@@ -14,6 +14,7 @@
     export let data: import('./$types').PageData;
 
     let isLoadingOperation = false; // New state for loading indicator
+    let kanbanScrollContainer: HTMLElement; // Declare variable for scroll container
 
     // --- KANBAN INTERFACES ---
     interface PlaceholderTask {
@@ -50,6 +51,8 @@
 	export let isDarkMode = false;
     export const dropdownIds = ['notifWindow', 'helpWindow', 'profileWindow'];
     export let usernameForDisplay: string;
+    export let handleGlobalClickListener: ((event: MouseEvent) => void) | null = null;
+    export let handleEscKeyListener: ((event: KeyboardEvent) => void) | null = null;
     // --- END Header/Sidebar UI State ---
 
     // --- KANBAN CARD DRAG & DROP STATE (COLUMN DRAG STATE IS REMOVED) ---
@@ -99,18 +102,6 @@
         });
     }
 
-    let modalEscListener: ((event: KeyboardEvent) => void) | null = null;
-    $: if (browser && isConfirmationModalOpen && !modalEscListener) {
-        modalEscListener = (event: KeyboardEvent) => {
-            if (event.key === 'Escape') {
-                handleModalCancel();
-            }
-        };
-        document.addEventListener('keydown', modalEscListener);
-    } else if (browser && !isConfirmationModalOpen && modalEscListener) {
-        document.removeEventListener('keydown', modalEscListener);
-        modalEscListener = null;
-    }
 
     function handleModalConfirm() {
         if (resolveConfirmationPromise) {
@@ -385,6 +376,7 @@
         localStorage.setItem(KANBAN_STORAGE_KEY, JSON.stringify(layoutToSave));
     }
 
+    // Standard UI Functions (toggleSidebar, DarkMode, Dropdowns, etc.)
     function toggleSidebar() { isSidebarOpen = !isSidebarOpen; }
     function closeSidebar() { isSidebarOpen = false; }
     function toggleDarkMode() {
@@ -413,14 +405,19 @@
         });
     }
 
-    let handleGlobalClickListener: ((event: MouseEvent) => void);
-    let handleEscKeyListener: ((event: KeyboardEvent) => void);
+    function handleLogout() {
+        if (browser) {
+            localStorage.removeItem('microtask_username');
+            document.cookie = "userId=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/; SameSite=Lax;";
+            goto('/login');
+        }
+    }
 
 	onMount(() => {
-        loadBoardStateFromLocalStorage(); 
+        loadBoardStateFromLocalStorage();
         DUMMY_DRAG_IMAGE = new Image();
         DUMMY_DRAG_IMAGE.src = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
-        
+
         const storedDarkMode = localStorage.getItem('theme');
 		if (storedDarkMode === 'dark' || (!storedDarkMode && window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
 			isDarkMode = true;
@@ -435,7 +432,7 @@
             if (iconElement) {
                 const listener = (e: Event) => { e.stopPropagation(); toggleWindow(windowId); };
                 iconElement.addEventListener('click', listener);
-                (iconElement as any).__clickHandler = listener; 
+                (iconElement as any).__clickHandler = listener;
             }
         };
         setupIconListener('bellIcon', 'notifWindow');
@@ -474,8 +471,8 @@
         };
 		if (browser) document.addEventListener('keydown', handleEscKeyListener);
 
-		return () => { 
-            if (browser) {
+		return () => {
+             if (browser) {
                 if (handleGlobalClickListener) document.removeEventListener('click', handleGlobalClickListener);
 			    if (handleEscKeyListener) document.removeEventListener('keydown', handleEscKeyListener);
             }
@@ -555,22 +552,50 @@
         }
     }
     async function handleDropOnCardOrColumn(event: DragEvent, targetDateKey: string, dropTargetTaskId?: string) {
-        event.preventDefault(); event.stopPropagation();
-        if (!draggedCardItem) { cleanupCardDragState(); return; }
+        event.preventDefault();
+        event.stopPropagation();
+
+        if (!draggedCardItem) {
+            cleanupCardDragState(); // Ensure cleanup if no dragged item
+            return;
+        }
 
         const { task: taskToMove, fromColumnId: originalDateKey } = draggedCardItem;
 
-        if (dropTargetTaskId === taskToMove.id && targetDateKey === originalDateKey) { cleanupCardDragState(); return; }
+        // Check if dropped on itself or same position in the same column
+        // (This condition might need refinement based on how you determine "same position")
+        if (
+            (dropTargetTaskId === taskToMove.id && targetDateKey === originalDateKey) ||
+            (targetDateKey === originalDateKey && !dropTargetTaskId && !currentCardDragOverInfo?.overTaskId && !currentCardDragOverInfo?.position) // Dropped on empty part of same column
+        ) {
+            // If dropped on the same spot or on the same column without a specific target,
+            // it's essentially a "cancel" of the drag from the user's perspective.
+            // We still need to clean up the drag visuals.
+            // The handleCardDragEnd will be called by the browser, which in turn calls cleanupCardDragState.
+            // So, just returning here might be enough IF activeDraggedCardElement is correctly reset in handleCardDragEnd.
+            // However, to be absolutely sure, especially if handleCardDragEnd isn't firing or
+            // if other logic might prevent its full effect, explicitly call cleanup.
+            
+            // The browser's 'dragend' event should still fire on the source element,
+            // which calls handleCardDragEnd(), which calls cleanupCardDragState().
+            // So, simply returning here is usually sufficient if activeDraggedCardElement is handled correctly
+            // in handleCardDragEnd.
 
-        // Confirmation for due date change
-        if (originalDateKey !== targetDateKey) {
-            const confirmed = await showCustomConfirm(`Change due date of task "${taskToMove.title}" to ${formatDateForColumnTitle(targetDateKey)}?`);
-            if (!confirmed) {
-                cleanupCardDragState();
-                return;
-            }
-            isLoadingOperation = true; // Start loading after confirmation
+            // If for some reason `handleCardDragEnd` isn't fully resetting the visual state
+            // in this specific scenario, you might need to add:
+            // resetDraggedCardVisuals(); // A hypothetical function to reset styles if handleCardDragEnd isn't enough
+            // cleanupCardDragState(); // This would then be redundant if handleCardDragEnd is called.
+            // For now, we rely on handleCardDragEnd to do its job.
+            return; 
         }
+
+
+        // --- Start loading if it's a date change ---
+        let wasDateChange = originalDateKey !== targetDateKey;
+        if (wasDateChange) {
+            isLoadingOperation = true;
+        }
+        // --- End loading logic ---
 
         const sourceCol = boardColumns.find(col => col.id === originalDateKey);
         let taskIndexInSource = -1;
@@ -593,8 +618,12 @@
         const destCol = boardColumns.find(col => col.id === targetDateKey);
         if (!destCol) {
             console.error("Destination column not found for optimistic update:", targetDateKey);
-            if (sourceCol && taskIndexInSource > -1) sourceCol.tasks.splice(taskIndexInSource, 0, taskToMove);
-            cleanupCardDragState(); return;
+            if (sourceCol && taskIndexInSource > -1) {
+                sourceCol.tasks.splice(taskIndexInSource, 0, taskToMove); // Put it back
+            }
+            if (wasDateChange) isLoadingOperation = false; // Reset loading if we bailed
+            // cleanupCardDragState(); // `handleCardDragEnd` should cover this.
+            return; // The drag operation effectively failed or was cancelled.
         }
 
         let inserted = false;
@@ -614,34 +643,47 @@
         }
         
         taskToMove.dueDateISO = targetDateKey === NO_DUE_DATE_COLUMN_ID ? null : targetDateKey;
+        // Recalculate status based on new due date or if it was completed/uncompleted by column move
+        taskToMove.status = recalculateTaskStatusClientSide(taskToMove);
+
 
         boardColumns = [...boardColumns]; 
         saveBoardStateToLocalStorage(); 
 
-        if (originalDateKey !== targetDateKey) {
+        if (wasDateChange) { // Only make server call if the date/column actually changed
             const formData = new FormData();
             formData.append('taskId', taskToMove.id);
             const newDueDateForServer = targetDateKey === NO_DUE_DATE_COLUMN_ID ? '' : targetDateKey;
             formData.append('newDueDateISO', newDueDateForServer);
+            // Include due time if relevant
+            if (targetDateKey !== NO_DUE_DATE_COLUMN_ID && taskToMove.dueTime) {
+                formData.append('newDueTime', taskToMove.dueTime);
+            } else if (targetDateKey === NO_DUE_DATE_COLUMN_ID) {
+                formData.append('newDueTime', ''); // Clear time if no due date
+            }
             
             try {
                 const response = await fetch('?/updateTaskDueDate', { method: 'POST', body: formData }); 
                 if (!response.ok) {
                     const result = await response.json().catch(() => ({updateDueDateForm: { error: "Failed to parse server error" }}));
                     console.error('Failed to update task due date on server:', result.updateDueDateForm?.error || 'Unknown server error');
+                    // Consider reverting optimistic update here
                 } else {
                     const result = await response.json();
                      if (!result.updateDueDateForm?.success) {
                         console.error('Server indicated failure for updateTaskDueDate:', result.updateDueDateForm?.error);
+                        // Consider reverting optimistic update here
                     }
                 }
             } catch (err) {
                 console.error('Error calling updateTaskDueDate action:', err);
+                // Consider reverting optimistic update here
             } finally {
                 isLoadingOperation = false; // End loading
             }
         }
-        cleanupCardDragState();
+        // cleanupCardDragState(); // `handleCardDragEnd` should cover this.
+        // The drag operation is considered complete. handleCardDragEnd will be invoked.
     }
     function handleCardDragEnd() {
         if (cardAnimationFrameId) { cancelAnimationFrame(cardAnimationFrameId); cardAnimationFrameId = null; }
@@ -650,12 +692,17 @@
             activeDraggedCardElement.style.position = ''; activeDraggedCardElement.style.left = ''; activeDraggedCardElement.style.top = '';
             activeDraggedCardElement.style.width = ''; activeDraggedCardElement.style.height = '';
             activeDraggedCardElement.style.zIndex = ''; activeDraggedCardElement.style.transform = ''; activeDraggedCardElement.style.margin = '';
+            activeDraggedCardElement.style.display = 'none'; // Hide the element after drag ends
         }
         cleanupCardDragState(); // Call to reset other drag-related state variables
     }
      function cleanupCardDragState() {
         draggedCardItem = null; 
         currentCardDragOverInfo = null; 
+        // Ensure display is reset if the element is reused, though it should be nullified
+        if (activeDraggedCardElement) {
+            activeDraggedCardElement.style.display = ''; 
+        }
         activeDraggedCardElement = null;
         cardDragOffsetX = 0; cardDragOffsetY = 0; currentCardX = 0; currentCardY = 0; targetCardX = 0; targetCardY = 0;
         cardVelocityX = 0; cardVelocityY = 0;
@@ -665,11 +712,14 @@
 </script>
 
 <!-- HTML Structure -->
-<div class="page-wrapper font-sans">
-    <LoadingIndicator fullScreen={isLoadingOperation} />
+<div class="page-wrapper font-sans" class:sidebar-open={isSidebarOpen}>
+    {#if isLoadingOperation}
+        <LoadingIndicator fullScreen={true} />
+    {/if}
+
 	{#if isSidebarOpen}
-    <aside
-         id="sidebar"
+    <div
+  id="sidebar"
   class={`fixed top-0 left-0 h-full w-64 shadow-lg z-50 flex flex-col justify-between p-4 border-r ${isDarkMode ? 'bg-zinc-800 border-zinc-700' : 'bg-white border-gray-200'}`}
   transition:fly={{ x: -300, duration: 300, easing: quintOut }}
 >
@@ -677,41 +727,61 @@
     <div class="flex items-center gap-2 mb-8 pb-4 border-b ${isDarkMode ? 'border-zinc-700' : 'border-gray-200'}">
       <img src={isDarkMode ? "/logonamindarkmode.png" : "/logonamin.png"} alt="Microtask Logo" class="w-8 h-8" />
       <h1 class={`text-xl font-bold ${isDarkMode ? 'text-zinc-100' : 'text-gray-800'}`}>Microtask</h1>
-        </div>
-        <nav class="sidebar-nav">
-          <a href="/home" class="nav-link" class:active={$page.url.pathname === '/home' || $page.url.pathname === '/'}>
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="nav-icon" aria-hidden="true"><path d="M11.47 3.84a.75.75 0 011.06 0l8.69 8.69a.75.75 0 101.06-1.06l-8.689-8.69a2.25 2.25 0 00-3.182 0l-8.69 8.69a.75.75 0 001.061 1.06l8.69-8.69z" /><path d="M12 5.432l8.159 8.159c.03.03.06.058.091.086v6.198c0 1.035-.84 1.875-1.875 1.875H15a.75.75 0 01-.75-.75v-4.5a.75.75 0 00-.75-.75h-3a.75.75 0 00-.75.75V21a.75.75 0 01-.75-.75H5.625a1.875 1.875 0 01-1.875-1.875v-6.198a2.29 2.29 0 00.091-.086L12 5.43z" /></svg>
+    </div>
+        <nav class="flex flex-col gap-2">
+          <a href="/home" class="flex items-center gap-3 px-3 py-2 rounded-md font-semibold transition-colors duration-150" class:active={$page.url.pathname === '/home' || $page.url.pathname === '/'}>
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-5 h-5" aria-hidden="true">
+              <path d="M11.47 3.84a.75.75 0 011.06 0l8.69 8.69a.75.75 0 101.06-1.06l-8.689-8.69a2.25 2.25 0 00-3.182 0l-8.69 8.69a.75.75 0 001.061 1.06l8.69-8.69z" />
+              <path d="M12 5.432l8.159 8.159c.03.03.06.058.091.086v6.198c0 1.035-.84 1.875-1.875 1.875H15a.75.75 0 01-.75-.75v-4.5a.75.75 0 00-.75-.75h-3a.75.75 0 00-.75.75V21a.75.75 0 01-.75.75H5.625a1.875 1.875 0 01-1.875-1.875v-6.198a2.29 2.29 0 00.091-.086L12 5.43z" />
+            </svg>
             <span>Home</span>
           </a>
-          <a href="/dashboard" class="nav-link" class:active={$page.url.pathname === '/dashboard'}>
-             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="nav-icon" aria-hidden="true"><path fill-rule="evenodd" d="M1 4a1 1 0 011-1h16a1 1 0 011 1v2.5a1 1 0 01-1 1H2a1 1 0 01-1-1V4zM2 9.5a1 1 0 011-1h4.5a1 1 0 011 1v6.5a1 1 0 01-1 1H3a1 1 0 01-1-1V9.5zM12.5 9.5A1 1 0 0011.5 10.5v6.5a1 1 0 001 1h4.5a1 1 0 001-1V9.5a1 1 0 00-1-1h-4.5z" clip-rule="evenodd" /></svg>
+          <a href="/dashboard"
+             class="flex items-center gap-3 px-3 py-2 rounded-md font-semibold transition-colors duration-150"
+             class:bg-blue-600={!isDarkMode && $page.url.pathname === '/dashboard'}
+             class:bg-blue-800={isDarkMode && $page.url.pathname === '/dashboard'}
+             class:text-white={$page.url.pathname === '/dashboard'}
+             class:text-gray-700={!isDarkMode && $page.url.pathname !== '/dashboard'}
+             class:text-zinc-300={isDarkMode && $page.url.pathname !== '/dashboard'}
+             class:hover:bg-gray-100={!isDarkMode}
+             class:hover:bg-zinc-700={isDarkMode}
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-5 h-5" aria-hidden="true">
+              <path d="M10.5 4.5a1.5 1.5 0 00-3 0v15a1.5 1.5 0 003 0V4.5z" />
+              <path d="M4.5 10.5a1.5 1.5 0 000 3h15a1.5 1.5 0 000-3h-15z" />
+              <path fill-rule="evenodd" d="M1.5 3A1.5 1.5 0 013 1.5h18A1.5 1.5 0 0122.5 3v18a1.5 1.5 0 01-1.5 1.5H3A1.5 1.5 0 011.5 21V3zm1.5.75v16.5h16.5V3.75H3z" clip-rule="evenodd" />
+            </svg>
             <span>Dashboard</span>
           </a>
-          <a href="/kanban" class="nav-link" class:active={$page.url.pathname.startsWith('/kanban') || $page.url.pathname.startsWith('/tasks')}>
-            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="nav-icon" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12h3.75M9 15h3.75M9 18h3.75m3 .75H18a2.25 2.25 0 0 0 2.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 0 0-1.123-.08m-5.801 0c-.065.21-.1.433-.1.664 0 .414.336.75.75.75h4.5a.75.75 0 0 0 .75-.75 2.25 2.25 0 0 0-.1-.664m-5.8 0A2.251 2.251 0 0 1 13.5 2.25H15c1.012 0 1.867.668 2.15 1.586m-5.8 0c-.376.023-.75.05-1.124.08C9.095 4.01 8.25 4.973 8.25 6.108V8.25m0 0H4.875c-.621 0-1.125.504-1.125 1.125v11.25c0 .621.504 1.125 1.125 1.125h9.75c.621 0 1.125-.504 1.125-1.125V9.375c0-.621-.504-1.125-1.125-1.125H8.25ZM6.75 12h.008v.008H6.75V12Zm0 3h.008v.008H6.75V15Zm0 3h.008v.008H6.75V18Z" /></svg>
-            <span>Kanban Board</span>
+          <a href="/kanban" class="flex items-center gap-3 px-3 py-2 rounded-md font-semibold transition-colors duration-150" class:hover:bg-gray-100={!isDarkMode} class:hover:bg-zinc-700={isDarkMode} class:text-gray-700={!isDarkMode} class:text-zinc-300={isDarkMode}>
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5" aria-hidden="true">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M9 12h3.75M9 15h3.75M9 18h3.75m3 .75H18a2.25 2.25 0 0 0 2.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 0 0-1.123-.08m-5.801 0c-.065.21-.1.433-.1.664 0 .414.336.75.75.75h4.5a.75.75 0 0 0 .75-.75 2.25 2.25 0 0 0-.1-.664m-5.8 0A2.251 2.251 0 0 1 13.5 2.25H15c1.012 0 1.867.668 2.15 1.586m-5.8 0c-.376.023-.75.05-1.124.08C9.095 4.01 8.25 4.973 8.25 6.108V8.25m0 0H4.875c-.621 0-1.125.504-1.125 1.125v11.25c0 .621.504 1.125 1.125 1.125h9.75c.621 0 1.125-.504 1.125-1.125V9.375c0-.621-.504-1.125-1.125-1.125H8.25ZM6.75 12h.008v.008H6.75V12Zm0 3h.008v.008H6.75V15Zm0 3h.008v.008H6.75V18Z" />
+            </svg>
+            <span>All Tasks</span>
           </a>
-          <a href="/calendar" class="nav-link" class:active={$page.url.pathname === '/calendar'}>
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="nav-icon" aria-hidden="true"><path fill-rule="evenodd" d="M6.75 2.25A.75.75 0 017.5 3v1.5h9V3A.75.75 0 0118 3v1.5h.75a3 3 0 013 3v11.25a3 3 0 01-3 3H5.25a3 3 0 01-3-3V7.5a3 3 0 013-3H6V3a.75.75 0 01.75-.75zM5.25 6.75c-.621 0-1.125.504-1.125 1.125V18a1.125 1.125 0 001.125 1.125h13.5A1.125 1.125 0 0019.875 18V7.875c0-.621-.504-1.125-1.125-1.125H5.25z" clip-rule="evenodd" /><path d="M10.5 9.75a.75.75 0 00-1.5 0v.01c0 .414.336.75.75.75H10.5v-.01a.75.75 0 000-1.5zM10.5 12.75a.75.75 0 00-1.5 0v.01c0 .414.336.75.75.75H10.5v-.01a.75.75 0 000-1.5zM10.5 15.75a.75.75 0 00-1.5 0v.01c0 .414.336.75.75.75H10.5v-.01a.75.75 0 000-1.5zM13.5 9.75a.75.75 0 00-1.5 0v.01c0 .414.336.75.75.75H13.5v-.01a.75.75 0 000-1.5zM13.5 12.75a.75.75 0 00-1.5 0v.01c0 .414.336.75.75.75H13.5v-.01a.75.75 0 000-1.5zM13.5 15.75a.75.75 0 00-1.5 0v.01c0 .414.336.75.75.75H13.5v-.01a.75.75 0 000-1.5zM16.5 9.75a.75.75 0 00-1.5 0v.01c0 .414.336.75.75.75H16.5v-.01a.75.75 0 000-1.5zM16.5 12.75a.75.75 0 00-1.5 0v.01c0 .414.336.75.75.75H16.5v-.01a.75.75 0 000-1.5zM16.5 15.75a.75.75 0 00-1.5 0v.01c0 .414.336.75.75.75H16.5v-.01a.75.75 0 000-1.5z"/></svg>
+          <a href="/calendar" class="flex items-center gap-3 px-3 py-2 rounded-md font-semibold transition-colors duration-150" class:hover:bg-gray-100={!isDarkMode} class:hover:bg-zinc-700={isDarkMode} class:text-gray-700={!isDarkMode} class:text-zinc-300={isDarkMode}>
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-5 h-5" aria-hidden="true">
+              <path fill-rule="evenodd" d="M6.75 2.25A.75.75 0 017.5 3v1.5h9V3A.75.75 0 0118 3v1.5h.75a3 3 0 013 3v11.25a3 3 0 01-3 3H5.25a3 3 0 01-3-3V7.5a3 3 0 013-3H6V3a.75.75 0 01.75-.75zM5.25 6.75c-.621 0-1.125.504-1.125 1.125V18a1.125 1.125 0 001.125 1.125h13.5A1.125 1.125 0 0019.875 18V7.875c0-.621-.504-1.125-1.125-1.125H5.25z" clip-rule="evenodd" /><path d="M10.5 9.75a.75.75 0 00-1.5 0v.01c0 .414.336.75.75.75H10.5v-.01a.75.75 0 000-1.5zM10.5 12.75a.75.75 0 00-1.5 0v.01c0 .414.336.75.75.75H10.5v-.01a.75.75 0 000-1.5zM10.5 15.75a.75.75 0 00-1.5 0v.01c0 .414.336.75.75.75H10.5v-.01a.75.75 0 000-1.5zM13.5 9.75a.75.75 0 00-1.5 0v.01c0 .414.336.75.75.75H13.5v-.01a.75.75 0 000-1.5zM13.5 12.75a.75.75 0 00-1.5 0v.01c0 .414.336.75.75.75H13.5v-.01a.75.75 0 000-1.5zM13.5 15.75a.75.75 0 00-1.5 0v.01c0 .414.336.75.75.75H13.5v-.01a.75.75 0 000-1.5zM16.5 9.75a.75.75 0 00-1.5 0v.01c0 .414.336.75.75.75H16.5v-.01a.75.75 0 000-1.5zM16.5 12.75a.75.75 0 00-1.5 0v.01c0 .414.336.75.75.75H16.5v-.01a.75.75 0 000-1.5zM16.5 15.75a.75.75 0 00-1.5 0v.01c0 .414.336.75.75.75H16.5v-.01a.75.75 0 000-1.5z"/></svg>
             <span>Calendar</span>
           </a>
-          <a href="/ai-chat" class="nav-link" class:active={$page.url.pathname === '/ai-chat'}>
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="nav-icon" aria-hidden="true"><path d="M12.001 2.504a2.34 2.34 0 00-2.335 2.335v.583c0 .582.212 1.13.582 1.556l.03.035-.03.034a2.34 2.34 0 00-2.917 3.916A3.287 3.287 0 004.08 14.25a3.287 3.287 0 003.287 3.287h8.266a3.287 3.287 0 003.287-3.287 3.287 3.287 0 00-1.253-2.583 2.34 2.34 0 00-2.917-3.916l-.03-.034.03-.035c.37-.425.582-.973.582-1.555v-.583a2.34 2.34 0 00-2.335-2.336h-.002zM9.75 12.75a.75.75 0 000 1.5h4.5a.75.75 0 000-1.5h-4.5z" /><path fill-rule="evenodd" d="M12 1.5c5.79 0 10.5 4.71 10.5 10.5S17.79 22.5 12 22.5 1.5 17.79 1.5 12 6.21 1.5 12 1.5zM2.85 12a9.15 9.15 0 019.15-9.15 9.15 9.15 0 019.15 9.15 9.15 9.15 0 01-9.15 9.15A9.15 9.15 0 012.85 12z" clip-rule="evenodd" /></svg>
+          <a href="/workspace" class="flex items-center gap-3 px-3 py-2 rounded-md font-semibold transition-colors duration-150" class:active={$page.url.pathname.startsWith('/workspace')}>
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5" aria-hidden="true">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M20.25 14.15v4.098a2.25 2.25 0 0 1-2.25 2.25h-12a2.25 2.25 0 0 1-2.25-2.25V14.15M18 18.75h.75A2.25 2.25 0 0 0 21 16.5v-1.5a2.25 2.25 0 0 0-2.25-2.25h-15A2.25 2.25 0 0 0 1.5 15v1.5A2.25 2.25 0 0 0 3.75 18.75H4.5M12 12.75a3 3 0 0 0-3-3H5.25V7.5a3 3 0 0 1 3-3h7.5a3 3 0 0 1 3 3v2.25H15a3 3 0 0 0-3 3Z" />
+            </svg>
+            <span>Workspace</span>
+          </a>
+          <a href="/ai-chat" class="flex items-center gap-3 px-3 py-2 rounded-md font-semibold transition-colors duration-150" class:hover:bg-gray-100={!isDarkMode} class:hover:bg-zinc-700={isDarkMode} class:text-gray-700={!isDarkMode} class:text-zinc-300={isDarkMode}>
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-5 h-5" aria-hidden="true"><path d="M12.001 2.504a2.34 2.34 0 00-2.335 2.335v.583c0 .582.212 1.13.582 1.556l.03.035-.03.034a2.34 2.34 0 00-2.917 3.916A3.287 3.287 0 004.08 14.25a3.287 3.287 0 003.287 3.287h8.266a3.287 3.287 0 003.287-3.287 3.287 3.287 0 00-1.253-2.583 2.34 2.34 0 00-2.917-3.916l-.03-.034.03-.035c.37-.425.582-.973.582-1.555v-.583a2.34 2.34 0 00-2.335-2.336h-.002zM9.75 12.75a.75.75 0 000 1.5h4.5a.75.75 0 000-1.5h-4.5z" /><path fill-rule="evenodd" d="M12 1.5c5.79 0 10.5 4.71 10.5 10.5S17.79 22.5 12 22.5 1.5 17.79 1.5 12 6.21 1.5 12 1.5zM2.85 12a9.15 9.15 0 019.15-9.15 9.15 9.15 0 019.15 9.15 9.15 9.15 0 01-9.15 9.15A9.15 9.15 0 012.85 12z" clip-rule="evenodd" /></svg>
             <span>Ask Synthia</span>
           </a>
         </nav>
       </div>
-        <form method="POST" action="?/logout" use:enhance={() => {
-            if (browser) localStorage.removeItem(KANBAN_STORAGE_KEY); 
-            return async ({ update }) => { await update(); };
-        }}>
-            <button type="submit" class="logout-button">
-                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="nav-icon" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0 0 13.5 3h-6a2.25 2.25 0 0 0-2.25 2.25v13.5A2.25 2.25 0 0 0 7.5 21h6a2.25 2.25 0 0 0 2.25-2.25V15m3 0 3-3m0 0-3-3m3 3H9" /></svg>
-                <span>Log out</span>
-            </button>
-        </form>
-    </aside>
-	{/if}
+      <button on:click={handleLogout} class="flex items-center gap-3 px-3 py-2 rounded-md font-semibold w-full mt-auto transition-colors duration-150" class:hover:bg-gray-100={!isDarkMode} class:hover:bg-zinc-700={isDarkMode} class:text-gray-700={!isDarkMode} class:text-zinc-300={isDarkMode}>
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0 0 13.5 3h-6a2.25 2.25 0 0 0-2.25 2.25v13.5A2.25 2.25 0 0 0 7.5 21h6a2.25 2.25 0 0 0 2.25-2.25V15m3 0 3-3m0 0-3-3m3 3H9" /></svg>
+        <span>Log out</span>
+      </button>
+    </div>
+  {/if}
 
 	<div class="main-content-wrapper">
 	<header class="top-header">
@@ -768,8 +838,9 @@
         <main class="main-content-kanban">
             <div class="board-header-kanban">
                 <h1 class="board-title-kanban">Tasks by Due Date</h1>
+                 <button class="add-task-board-button" on:click={() => openAddTaskModal(NO_DUE_DATE_COLUMN_ID)}>+ Add a new task</button>
             </div>
-            <div class="kanban-board-scroll-container">
+            <div class="kanban-board-scroll-container" bind:this={kanbanScrollContainer}>
                 <div class="kanban-board">
                     {#if data.error}
                         <p class="p-4 text-red-600">Error loading board: {data.error}</p>
@@ -962,7 +1033,7 @@
 <style>
     /* --- SHARED STYLES --- */
     .font-sans { font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
-    .page-wrapper { display: flex; height: 100vh; color: #1f2937; background-color: #ffffff; }
+    .page-wrapper { display: flex; min-height: 100vh; color: #1f2937; background-color: #ffffff; }
     canvas { display: block; } .hidden-dropdown { display: none !important; } .capitalize { text-transform: capitalize; }
 	.sidebar-container { background-color: #ffffff; border-right: 1px solid #e5e7eb; color: #374151; position: fixed; top: 0; left: 0; height: 100%; width: 16rem; box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1), 0 4px 6px -2px rgba(0,0,0,0.05); z-index: 50; display: flex; flex-direction: column; justify-content: space-between; padding: 1rem; box-sizing: border-box; }
     .sidebar-header { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 2rem; padding-bottom: 1rem; border-bottom: 1px solid #e5e7eb; }
@@ -1237,7 +1308,7 @@
     .priority-high { border-left-color: var(--priority-high-light); }
     .priority-medium { border-left-color: var(--priority-medium-light); }
     .priority-low { border-left-color: var(--priority-low-light); }
-    .priority-standard { border-left-color: var(--border-light); } 
+    .priority-standard { border-left-color: var(--priority-standard-light); } 
     :global(body.dark) .priority-high { border-left-color: var(--priority-high-dark); }
     :global(body.dark) .priority-medium { border-left-color: var(--priority-medium-dark); }
     :global(body.dark) .priority-low { border-left-color: var(--priority-low-dark); }
@@ -1254,6 +1325,9 @@
     max-width: 550px;
     text-align: left; /* Align form elements to the left */
 }
+
+/* --- UPDATE DUE DATE MODAL STYLES (reusing add-task-modal-content for consistency) --- */
+/* No specific new styles needed beyond what's already defined for .modal-content and form elements */
 
 .form-group {
     margin-bottom: 1rem;
@@ -1332,5 +1406,57 @@
     background-color: #450a0a; /* Darker red bg */
     color: #fecaca; /* Light red text */
     border-color: #7f1d1d; /* Dark red border */
+}
+
+/* --- FLOATING MESSAGE MODAL STYLES --- */
+.floating-message-modal {
+    position: fixed;
+    top: 20px; /* Adjust as needed */
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 1100; /* Higher than other modals */
+    pointer-events: none; /* Allow clicks to pass through if not interacting with the message itself */
+    width: auto; /* Adjust width based on content */
+    max-width: 90%; /* Max width for responsiveness */
+}
+
+.floating-message-content {
+    background-color: #fef3c7; /* Light yellow for warning */
+    color: #92400e; /* Dark orange text */
+    border: 1px solid #fde68a; /* Yellow border */
+    padding: 12px 20px;
+    border-radius: 8px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    display: flex;
+    align-items: center;
+    gap: 15px;
+    font-size: 0.95rem;
+    font-weight: 500;
+    pointer-events: auto; /* Re-enable pointer events for the content itself */
+}
+:global(body.dark) .floating-message-content {
+    background-color: #4a3a1d; /* Darker yellow for dark mode */
+    color: #fde68a; /* Lighter yellow text for dark mode */
+    border-color: #92400e; /* Darker orange border for dark mode */
+}
+
+.floating-message-content p {
+    margin: 0;
+    flex-grow: 1;
+}
+
+.floating-message-close-btn {
+    background: none;
+    border: none;
+    color: inherit;
+    font-size: 1.5rem;
+    line-height: 1;
+    cursor: pointer;
+    padding: 0 5px;
+    transition: opacity 0.2s;
+}
+
+.floating-message-close-btn:hover {
+    opacity: 0.7;
 }
 </style>
