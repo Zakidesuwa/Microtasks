@@ -16,12 +16,15 @@ export interface OriginalTemplateStep {
 // Ensure 'export' is present
 export async function getOpenRouterCompletion(prompt: string): Promise<string | null> {
   try {
+    console.log('DEBUG: OPENROUTER_API_KEY length:', OPENROUTER_API_KEY ? OPENROUTER_API_KEY.length : 'undefined/null');
+    console.log('DEBUG: OPENROUTER_API_KEY starts with:', OPENROUTER_API_KEY ? OPENROUTER_API_KEY.substring(0, 5) : 'undefined/null');
+
     const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
         'Content-Type': 'application/json',
-        'Referer': 'https://your-app-domain.com', // User should update this to their actual domain
+        'Referer': 'http://localhost:5173', // Updated for local development
         'X-Title': 'Microtask AI Task Generation'
       },
       body: JSON.stringify({

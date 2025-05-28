@@ -76,12 +76,34 @@
     export let newTaskDueTime = '';
     export let newTaskDescription = '';
     export let newTaskPriority = 'standard'; // Default priority
-    //newthing
-    export let isMessageModalOpen = false; // Renamed from isConfirmationModalOpen
-    export let messageModalMessage = ''; // Renamed from confirmationModalMessage
-    export let messageModalIsConfirm = false; // New: true if it's a confirm dialog, false if just a message
-    export let resolveMessageModalPromise: ((confirmed: boolean) => void) | null = null; // Renamed from resolveConfirmationPromise
     
+    //newthing
+    export let isMessageModalOpen = false; // For floating messages
+    export let messageModalMessage = '';   // Message content
+    let messageTimeoutId: number | undefined; // For auto-closing messages
+
+    const TASK_MOVE_ERROR_FUTURE_DUE_DATE = 'TASK_MOVE_ERROR_FUTURE_DUE_DATE';
+
+    function showCustomMessage(message: string, duration: number = 3000, errorCode: string | null = null) {
+        messageModalMessage = message;
+        isMessageModalOpen = true;
+        // You could store errorCode here if you wanted to display it or use it for conditional styling
+        // For now, it's just passed along.
+        if (messageTimeoutId) clearTimeout(messageTimeoutId);
+        messageTimeoutId = window.setTimeout(() => {
+            isMessageModalOpen = false;
+            messageModalMessage = '';
+        }, duration);
+    }
+
+    // --- UPDATE DUE DATE MODAL STATE ---
+    export let isUpdateDueDateModalOpen = false;
+    export let updateDueDateTaskId: string | null = null;
+    export let updateDueDateTaskTitle: string = '';
+    export let newUpdatedDueDate: string = '';
+    export let newUpdatedDueTime: string = '';
+    export let resolveUpdateDueDatePromise: ((confirmed: { date: string, time: string } | null) => void) | null = null;
+
     // --- KANBAN COLUMN DRAG & DROP STATE (WITH ANIMATION VARS) ---
     export let draggedColumnId: string | null = null;
     export let currentColumnDragOverInfo: { columnId: string; position?: 'before' | 'after' } | null = null;
@@ -138,60 +160,38 @@
     }
         
 
-    let messageTimeoutId: number | undefined; // For auto-closing messages
-
-    async function showCustomConfirm(message: string): Promise<boolean> {
+    async function showUpdateDueDateModal(taskId: string, taskTitle: string, currentDueDate: string | null, currentDueTime: string | null): Promise<{ date: string, time: string } | null> {
         return new Promise((resolve) => {
-            messageModalMessage = message;
-            messageModalIsConfirm = true; // This is a confirmation dialog
-            isMessageModalOpen = true;
-            resolveMessageModalPromise = resolve;
+            updateDueDateTaskId = taskId;
+            updateDueDateTaskTitle = taskTitle;
+            newUpdatedDueDate = currentDueDate || '';
+            newUpdatedDueTime = currentDueTime || '';
+            isUpdateDueDateModalOpen = true;
+            resolveUpdateDueDatePromise = resolve;
         });
     }
 
-    function showCustomMessage(message: string, duration: number = 3000) {
-        messageModalMessage = message;
-        messageModalIsConfirm = false; // This is just a message
-        isMessageModalOpen = true;
-        if (messageTimeoutId) clearTimeout(messageTimeoutId);
-        messageTimeoutId = window.setTimeout(() => {
-            closeMessageModal();
-        }, duration);
-    }
-
-    let modalEscListener: ((event: KeyboardEvent) => void) | null = null;
-    $: if (browser && isMessageModalOpen && !modalEscListener) {
-        modalEscListener = (event: KeyboardEvent) => {
-            if (event.key === 'Escape') {
-                handleMessageModalCancel();
-            }
-        };
-        document.addEventListener('keydown', modalEscListener);
-    } else if (browser && !isMessageModalOpen && modalEscListener) {
-        document.removeEventListener('keydown', modalEscListener);
-        modalEscListener = null;
-    }
-
-    function handleMessageModalConfirm() {
-        if (resolveMessageModalPromise) {
-            resolveMessageModalPromise(true);
+    function handleUpdateDueDateConfirm() {
+        if (resolveUpdateDueDatePromise) {
+            resolveUpdateDueDatePromise({ date: newUpdatedDueDate, time: newUpdatedDueTime });
         }
-        closeMessageModal();
+        closeUpdateDueDateModal();
     }
 
-    function handleMessageModalCancel() {
-        if (resolveMessageModalPromise) {
-            resolveMessageModalPromise(false);
+    function handleUpdateDueDateCancel() {
+        if (resolveUpdateDueDatePromise) {
+            resolveUpdateDueDatePromise(null);
         }
-        closeMessageModal();
+        closeUpdateDueDateModal();
     }
 
-    function closeMessageModal() {
-        isMessageModalOpen = false;
-        messageModalMessage = '';
-        messageModalIsConfirm = false;
-        resolveMessageModalPromise = null;
-        if (messageTimeoutId) clearTimeout(messageTimeoutId);
+    function closeUpdateDueDateModal() {
+        isUpdateDueDateModalOpen = false;
+        updateDueDateTaskId = null;
+        updateDueDateTaskTitle = '';
+        newUpdatedDueDate = '';
+        newUpdatedDueTime = '';
+        resolveUpdateDueDatePromise = null;
     }
 
         function handleColumnDragStart(event: DragEvent, columnId: string) {
@@ -679,9 +679,7 @@
 
         handleEscKeyListener = (event: KeyboardEvent) => {
             if (event.key === 'Escape') {
-                if (isMessageModalOpen) {
-                    handleMessageModalCancel();
-                } else if (isAddTaskModalOpen) { // ADD THIS ELSE IF
+                if (isAddTaskModalOpen) {
                     closeAddTaskModal();
                 } else {
                     if (isSidebarOpen) closeSidebar();
@@ -794,45 +792,99 @@
             return;
         }
 
-        const originalIsCompleted = taskInFlatList.isCompleted;
-        const originalStatus = taskInFlatList.status;
+        // --- Re-add restriction for moving completed tasks to incomplete if due date is in future ---
+        const isMovingFromCompleted = originalVisualColumnId === COLUMN_COMPLETED_ID;
+        const isMovingToIncomplete = targetStatusColumnId === COLUMN_INCOMPLETE_ID;
 
-        resetDraggedCardVisuals(); // Reset visuals BEFORE any async confirm
+        if (isMovingFromCompleted && isMovingToIncomplete) {
+            const now = new Date();
+            const preciseDueDate = getPreciseDueDateInTimezoneAsUTC_Client(
+                taskInFlatList.dueDateISO,
+                taskInFlatList.dueTime,
+                PHILIPPINES_TIMEZONE_OFFSET_HOURS_CLIENT
+            );
+
+            if (preciseDueDate && preciseDueDate.getTime() > now.getTime()) {
+                showCustomMessage(`Cannot move "${taskInFlatList.title}" to Overdue. Its due date is still in the future.`, 3000, TASK_MOVE_ERROR_FUTURE_DUE_DATE);
+                resetDraggedCardVisuals();
+                cleanupCardDragState();
+                return; // Prevent the drop
+            }
+        }
+        // --- End re-added restriction ---
+
+        // --- New restriction for moving pending tasks to incomplete if due date is in future ---
+        const isMovingFromPending = originalVisualColumnId === COLUMN_PENDING_ID;
+        const isMovingToIncompleteNew = targetStatusColumnId === COLUMN_INCOMPLETE_ID;
+
+        if (isMovingFromPending && isMovingToIncompleteNew) {
+            const now = new Date();
+            const preciseDueDate = getPreciseDueDateInTimezoneAsUTC_Client(
+                taskInFlatList.dueDateISO,
+                taskInFlatList.dueTime,
+                PHILIPPINES_TIMEZONE_OFFSET_HOURS_CLIENT
+            );
+
+            if (preciseDueDate && preciseDueDate.getTime() > now.getTime()) {
+                showCustomMessage(`Cannot move "${taskInFlatList.title}" to Overdue. Its due date is still in the future.`, 3000, TASK_MOVE_ERROR_FUTURE_DUE_DATE);
+                resetDraggedCardVisuals();
+                cleanupCardDragState();
+                return; // Prevent the drop
+            }
+        }
+        // --- End new restriction ---
+
+
+        const originalIsCompleted = taskInFlatList.isCompleted;
+        const originalDueDateISO = taskInFlatList.dueDateISO; // Store original due date
+        const originalDueTime = taskInFlatList.dueTime;     // Store original due time
+
+        resetDraggedCardVisuals();
 
         if (dropTargetTaskId === taskInFlatList.id && targetStatusColumnId === originalVisualColumnId && !currentCardDragOverInfo?.position) {
-            isLoadingOperation = false; // No actual change, so stop loading
+            isLoadingOperation = false;
             cleanupCardDragState();
             return;
         }
         
         let performOptimisticUpdateAndServerCall = false;
         let newIsCompletedStateForOptimisticUpdate = originalIsCompleted;
+        let newDueDateISO: string | null = originalDueDateISO;
+        let newDueTime: string | null = originalDueTime;
 
-        if (targetStatusColumnId === COLUMN_COMPLETED_ID && !originalIsCompleted) {
-            const confirmed = await showCustomConfirm(`Mark task "${taskInFlatList.title}" as Completed?`);
-            if (confirmed) {
-                newIsCompletedStateForOptimisticUpdate = true;
-                performOptimisticUpdateAndServerCall = true;
+        // Determine the new isCompleted state based on the target column
+        if (targetStatusColumnId === COLUMN_COMPLETED_ID) {
+            newIsCompletedStateForOptimisticUpdate = true;
+        } else if (targetStatusColumnId === COLUMN_PENDING_ID || targetStatusColumnId === COLUMN_INCOMPLETE_ID) {
+            newIsCompletedStateForOptimisticUpdate = false;
+        }
+
+        // If an overdue task is moved to To Do / Pending, prompt for due date update
+        if (taskInFlatList.status === 'incomplete' && targetStatusColumnId === COLUMN_PENDING_ID) {
+            const newDateTime = await showUpdateDueDateModal(taskInFlatList.id, taskInFlatList.title, originalDueDateISO, originalDueTime);
+            if (newDateTime) {
+                newDueDateISO = newDateTime.date;
+                newDueTime = newDateTime.time;
+                performOptimisticUpdateAndServerCall = true; // Trigger server update for due date
             } else {
-                isLoadingOperation = false; // User declined, stop loading
-                cleanupCardDragState();
-                return;
-            }
-        } else if ((targetStatusColumnId === COLUMN_PENDING_ID || targetStatusColumnId === COLUMN_INCOMPLETE_ID) && originalIsCompleted) {
-            const confirmed = await showCustomConfirm(`Mark task "${taskInFlatList.title}" as Incomplete? This will move it out of 'Completed'.`);
-            if (confirmed) {
-                newIsCompletedStateForOptimisticUpdate = false;
-                performOptimisticUpdateAndServerCall = true;
-            } else {
-                isLoadingOperation = false; // User declined, stop loading
+                isLoadingOperation = false; // User cancelled due date update
                 cleanupCardDragState();
                 return;
             }
         }
 
+        // Always trigger server update if the target column is different from the original visual column
+        // OR if the isCompleted state changes.
+        if (targetStatusColumnId !== originalVisualColumnId || newIsCompletedStateForOptimisticUpdate !== originalIsCompleted) {
+            performOptimisticUpdateAndServerCall = true;
+        }
+
+
         // --- Apply optimistic update if confirmed ---
         if (performOptimisticUpdateAndServerCall) {
             taskInFlatList.isCompleted = newIsCompletedStateForOptimisticUpdate;
+            taskInFlatList.dueDateISO = newDueDateISO;
+            taskInFlatList.dueTime = newDueTime;
             taskInFlatList.status = recalculateTaskStatusClientSide(taskInFlatList);
         }
         
@@ -843,6 +895,8 @@
         });
 
         let actualDestColId: string;
+        // The actual destination column ID is determined by the task's *newly calculated status*
+        // after the optimistic update. This is crucial for correct client-side rendering.
         if (taskInFlatList.status === 'pending') actualDestColId = COLUMN_PENDING_ID;
         else if (taskInFlatList.status === 'incomplete') actualDestColId = COLUMN_INCOMPLETE_ID;
         else actualDestColId = COLUMN_COMPLETED_ID;
@@ -851,9 +905,16 @@
 
         if (!destCol) {
             console.error("Destination column not found for status:", taskInFlatList.status, actualDestColId);
+            // Revert optimistic update if destination column not found
             if(performOptimisticUpdateAndServerCall) {
                 taskInFlatList.isCompleted = originalIsCompleted;
-                taskInFlatList.status = originalStatus;
+                taskInFlatList.dueDateISO = originalDueDateISO;
+                taskInFlatList.dueTime = originalDueTime;
+                taskInFlatList.status = recalculateTaskStatusClientSide({
+                    isCompleted: originalIsCompleted,
+                    dueDateISO: originalDueDateISO,
+                    dueTime: originalDueTime
+                });
             }
             allTasksFlatList = [...allTasksFlatList]; 
             cleanupCardDragState(); 
@@ -880,44 +941,71 @@
         saveBoardStateToLocalStorage();
 
         // --- Server Action (if needed and confirmed) ---
-        if (performOptimisticUpdateAndServerCall) { // This flag is true only if user confirmed
-            isLoadingOperation = true; // Start loading only AFTER confirmation
+        if (performOptimisticUpdateAndServerCall) {
+            isLoadingOperation = true;
             const formDataForServer = new FormData();
             formDataForServer.append('taskId', taskInFlatList.id);
             formDataForServer.append('isCompleted', String(newIsCompletedStateForOptimisticUpdate)); 
+            // Only append due date/time if they actually changed or if it's a new task
+            if (newDueDateISO !== originalDueDateISO || newDueTime !== originalDueTime) {
+                formDataForServer.append('dueDateISO', newDueDateISO || '');
+                formDataForServer.append('dueTime', newDueTime || '');
+            }
 
             try {
-                const response = await fetch('?/toggleComplete', { method: 'POST', body: formDataForServer });
-                // ... (rest of your server call and error handling logic - unchanged from previous version) ...
+                const response = await fetch('?/updateTask', { method: 'POST', body: formDataForServer });
                 if (!response.ok) {
-                    const result = await response.json().catch(() => ({ toggleCompleteForm: { error: "Failed to parse server error" }}));
-                    console.error('Failed to update task completion on server:', result.toggleCompleteForm?.error || 'Unknown server error');
+                    const result = await response.json().catch(() => ({ updateTaskForm: { error: "Failed to parse server error" }}));
+                    console.error('Failed to update task on server:', result.updateTaskForm?.error || 'Unknown server error');
+                    // Revert optimistic update on server failure
                     taskInFlatList.isCompleted = originalIsCompleted;
-                    taskInFlatList.status = originalStatus; 
+                    taskInFlatList.dueDateISO = originalDueDateISO;
+                    taskInFlatList.dueTime = originalDueTime;
+                    taskInFlatList.status = recalculateTaskStatusClientSide({
+                        isCompleted: originalIsCompleted,
+                        dueDateISO: originalDueDateISO,
+                        dueTime: originalDueTime
+                    });
                     allTasksFlatList = [...allTasksFlatList]; 
                 } else {
                     const result = await response.json();
-                    if (result.toggleCompleteForm?.taskId && result.toggleCompleteForm.newCompletedState !== undefined) {
-                        const taskToFinalize = allTasksFlatList.find(t => t.id === result.toggleCompleteForm.taskId);
+                    if (result.updateTaskForm?.taskId) {
+                        const taskToFinalize = allTasksFlatList.find(t => t.id === result.updateTaskForm.taskId);
                         if (taskToFinalize) {
-                            taskToFinalize.isCompleted = result.toggleCompleteForm.newCompletedState;
+                            taskToFinalize.isCompleted = result.updateTaskForm.isCompleted;
+                            taskToFinalize.dueDateISO = result.updateTaskForm.dueDateISO;
+                            taskToFinalize.dueTime = result.updateTaskForm.dueTime;
                             taskToFinalize.status = recalculateTaskStatusClientSide(taskToFinalize);
                             allTasksFlatList = [...allTasksFlatList];
                         }
-                    } else if (result.toggleCompleteForm && !result.toggleCompleteForm.successMessage && result.toggleCompleteForm.error) { 
-                         console.error('Server indicated failure for toggleComplete:', result.toggleCompleteForm.error);
+                    } else if (result.updateTaskForm && !result.updateTaskForm.successMessage && result.updateTaskForm.error) {
+                         console.error('Server indicated failure for updateTask:', result.updateTaskForm.error);
+                         // Revert optimistic update on server failure
                          taskInFlatList.isCompleted = originalIsCompleted;
-                         taskInFlatList.status = originalStatus;
+                         taskInFlatList.dueDateISO = originalDueDateISO;
+                         taskInFlatList.dueTime = originalDueTime;
+                         taskInFlatList.status = recalculateTaskStatusClientSide({
+                            isCompleted: originalIsCompleted,
+                            dueDateISO: originalDueDateISO,
+                            dueTime: originalDueTime
+                         });
                          allTasksFlatList = [...allTasksFlatList];
                     }
                 }
             } catch (err) {
-                console.error('Error calling toggleComplete action:', err);
+                console.error('Error calling updateTask action:', err);
+                // Revert optimistic update on network error
                 taskInFlatList.isCompleted = originalIsCompleted;
-                taskInFlatList.status = originalStatus;
+                taskInFlatList.dueDateISO = originalDueDateISO;
+                taskInFlatList.dueTime = originalDueTime;
+                taskInFlatList.status = recalculateTaskStatusClientSide({
+                    isCompleted: originalIsCompleted,
+                    dueDateISO: originalDueDateISO,
+                    dueTime: originalDueTime
+                });
                 allTasksFlatList = [...allTasksFlatList];
             } finally {
-                isLoadingOperation = false; // End loading
+                isLoadingOperation = false;
             }
         }
         cleanupCardDragState();
@@ -1227,7 +1315,7 @@
                                         </div>
                                     </div>
                                 {/each}
-                                {#if !draggedCardItem && (column.id === COLUMN_PENDING_ID || column.id === COLUMN_INCOMPLETE_ID) } 
+                                {#if !draggedCardItem && column.id === COLUMN_PENDING_ID } 
     <button class="add-card-button" on:click={() => openAddTaskModal(column.id)}>+ Add a card</button>
 {/if}
                             </div>
@@ -1237,15 +1325,12 @@
             </div>
         </main>
 	</div>
-    {#if isMessageModalOpen}
-<div class="modal-overlay" on:click={handleMessageModalCancel}>
-    <div class="modal-content" on:click|stopPropagation>
-        <h3 class="modal-title">Confirm Action</h3>
-        <p class="modal-message">{messageModalMessage}</p>
-        <div class="modal-actions">
-            <button class="modal-button modal-button-cancel" on:click={handleMessageModalCancel}>Cancel</button>
-            <button class="modal-button modal-button-confirm" on:click={handleMessageModalConfirm}>Confirm</button>
-        </div>
+
+{#if isMessageModalOpen}
+<div class="floating-message-modal" transition:fly={{ y: -50, duration: 300, easing: quintOut }}>
+    <div class="floating-message-content">
+        <p>{messageModalMessage}</p>
+        <button class="floating-message-close-btn" on:click={() => isMessageModalOpen = false}>&times;</button>
     </div>
 </div>
 {/if}
@@ -1379,6 +1464,28 @@
 </div>
 {/if}
 </div>
+
+{#if isUpdateDueDateModalOpen}
+<div class="modal-overlay" on:click={handleUpdateDueDateCancel}>
+    <div class="modal-content add-task-modal-content" on:click|stopPropagation>
+        <h3 class="modal-title">Update Due Date for "{updateDueDateTaskTitle}"</h3>
+        <div class="form-group-row">
+            <div class="form-group">
+                <label for="newUpdatedDueDate" class="form-label">New Due Date*</label>
+                <input type="date" id="newUpdatedDueDate" bind:value={newUpdatedDueDate} required class="form-input"/>
+            </div>
+            <div class="form-group">
+                <label for="newUpdatedDueTime" class="form-label">New Due Time*</label>
+                <input type="time" id="newUpdatedDueTime" bind:value={newUpdatedDueTime} required class="form-input"/>
+            </div>
+        </div>
+        <div class="modal-actions">
+            <button type="button" class="modal-button modal-button-cancel" on:click={handleUpdateDueDateCancel}>Cancel</button>
+            <button type="button" class="modal-button modal-button-confirm" on:click={handleUpdateDueDateConfirm}>Update</button>
+        </div>
+    </div>
+</div>
+{/if}
 
 <style>
     /* --- SHARED STYLES --- */
@@ -1676,6 +1783,9 @@
     text-align: left; /* Align form elements to the left */
 }
 
+/* --- UPDATE DUE DATE MODAL STYLES (reusing add-task-modal-content for consistency) --- */
+/* No specific new styles needed beyond what's already defined for .modal-content and form elements */
+
 .form-group {
     margin-bottom: 1rem;
 }
@@ -1753,5 +1863,57 @@
     background-color: #450a0a; /* Darker red bg */
     color: #fecaca; /* Light red text */
     border-color: #7f1d1d; /* Dark red border */
+}
+
+/* --- FLOATING MESSAGE MODAL STYLES --- */
+.floating-message-modal {
+    position: fixed;
+    top: 20px; /* Adjust as needed */
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 1100; /* Higher than other modals */
+    pointer-events: none; /* Allow clicks to pass through if not interacting with the message itself */
+    width: auto; /* Adjust width based on content */
+    max-width: 90%; /* Max width for responsiveness */
+}
+
+.floating-message-content {
+    background-color: #fef3c7; /* Light yellow for warning */
+    color: #92400e; /* Dark orange text */
+    border: 1px solid #fde68a; /* Yellow border */
+    padding: 12px 20px;
+    border-radius: 8px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    display: flex;
+    align-items: center;
+    gap: 15px;
+    font-size: 0.95rem;
+    font-weight: 500;
+    pointer-events: auto; /* Re-enable pointer events for the content itself */
+}
+:global(body.dark) .floating-message-content {
+    background-color: #4a3a1d; /* Darker yellow for dark mode */
+    color: #fde68a; /* Lighter yellow text for dark mode */
+    border-color: #92400e; /* Darker orange border for dark mode */
+}
+
+.floating-message-content p {
+    margin: 0;
+    flex-grow: 1;
+}
+
+.floating-message-close-btn {
+    background: none;
+    border: none;
+    color: inherit;
+    font-size: 1.5rem;
+    line-height: 1;
+    cursor: pointer;
+    padding: 0 5px;
+    transition: opacity 0.2s;
+}
+
+.floating-message-close-btn:hover {
+    opacity: 0.7;
 }
 </style>

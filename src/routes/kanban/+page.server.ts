@@ -296,6 +296,7 @@ export const actions: Actions = {
         const priority = formData.get('priority')?.toString();
         const dueDate = formData.get('dueDate')?.toString();
         const dueTime = formData.get('dueTime')?.toString();
+        const isCompletedString = formData.get('isCompleted')?.toString(); // New: Get isCompleted from form data
 
         if (!title && title !== undefined) { // Check if title is explicitly empty, not just missing
              return fail(400, { taskForm: { error: 'Task title is required.', taskId } });
@@ -303,8 +304,9 @@ export const actions: Actions = {
         
         // Type for update payload, ensuring lastModified is FieldValue
         // Other fields are optional and match FetchedTaskData structure.
-        type TaskUpdatePayload = Partial<Omit<FetchedTaskData, 'lastModified'>> & {
+        type TaskUpdatePayload = Partial<Omit<FetchedTaskData, 'lastModified' | 'completedAt'>> & {
             lastModified: FieldValue;
+            completedAt?: FieldValue | null; // Allow completedAt to be updated
         };
 
         const taskUpdateData: TaskUpdatePayload = { 
@@ -315,26 +317,28 @@ export const actions: Actions = {
         if (description !== undefined) taskUpdateData.description = description;
         if (priority !== undefined) taskUpdateData.priority = priority;
 
-        if (dueDate === null || dueDate === '' || dueDate === undefined) {
-            taskUpdateData.dueDate = null;
-            taskUpdateData.dueTime = null; 
-        } else if (dueDate.match(/^\d{4}-\d{2}-\d{2}$/)) {
-            taskUpdateData.dueDate = dueDate;
-        } else if (dueDate !== undefined) { // only fail if dueDate was provided and invalid
-            return fail(400, { taskForm: { error: 'Invalid due date format.', taskId } });
+        if (dueDate !== undefined) { // Only update if dueDate was provided in the form
+            if (dueDate === null || dueDate === '') {
+                taskUpdateData.dueDate = null;
+            } else if (dueDate.match(/^\d{4}-\d{2}-\d{2}$/)) {
+                taskUpdateData.dueDate = dueDate;
+            } else {
+                return fail(400, { taskForm: { error: 'Invalid due date format.', taskId } });
+            }
         }
 
-        if (dueTime === null || dueTime === '' || dueTime === undefined || taskUpdateData.dueDate === null) {
-            // If dueDate is being set to null, dueTime should also be null even if not explicitly passed as empty
-            if (taskUpdateData.dueDate === null && dueTime !== undefined) { // if dueTime was provided but dueDate is now null
-                 taskUpdateData.dueTime = null;
-            } else if (dueTime !== undefined) { // only update if dueTime was actually passed
+        if (dueTime !== undefined) { // Only update if dueTime was provided in the form
+            if (dueTime === null || dueTime === '') {
                 taskUpdateData.dueTime = null;
+            } else if (dueTime.match(/^\d{2}:\d{2}$/)) {
+                taskUpdateData.dueTime = dueTime;
+            } else {
+                return fail(400, { taskForm: { error: 'Invalid due time format.', taskId } });
             }
-        } else if (dueTime.match(/^\d{2}:\d{2}$/)) {
-            taskUpdateData.dueTime = dueTime;
-        } else if (dueTime !== undefined) { // only fail if dueTime was provided and invalid
-            return fail(400, { taskForm: { error: 'Invalid due time format.', taskId } });
+        }
+        // If dueDate was explicitly set to null, ensure dueTime is also null
+        if (taskUpdateData.dueDate === null) {
+            taskUpdateData.dueTime = null;
         }
         
         try {
@@ -343,83 +347,68 @@ export const actions: Actions = {
             if (!taskDoc.exists) return fail(404, { taskForm: { error: 'Task not found.' } });
             if (taskDoc.data()?.userId !== userId) return fail(403, { taskForm: { error: 'Permission denied.' } });
             
+            // New: Handle isCompleted and completedAt
+            if (isCompletedString !== undefined) {
+                const newIsCompleted = isCompletedString === 'true';
+                taskUpdateData.isCompleted = newIsCompleted;
+                taskUpdateData.completedAt = newIsCompleted ? FieldValue.serverTimestamp() : null;
+            }
+
             await taskRef.update(taskUpdateData);
-            return { taskForm: { success: true, message: 'Task updated successfully!' } };
+
+            // Re-fetch the task to get its current state after update
+            const updatedTaskDoc = await taskRef.get();
+            const updatedTaskData = updatedTaskDoc.data();
+
+            // Return updated isCompleted, dueDateISO, and dueTime for client-side reconciliation
+            return { 
+                taskForm: { 
+                    success: true, 
+                    message: 'Task updated successfully!',
+                    taskId: taskId,
+                    isCompleted: updatedTaskData?.isCompleted, // Use actual updated value
+                    dueDateISO: updatedTaskData?.dueDate,      // Use actual updated value
+                    dueTime: updatedTaskData?.dueTime           // Use actual updated value
+                } 
+            };
         } catch (error: any) {
             console.error(`[Action updateTask /kanban] ERROR for task ${taskId}:`, error);
             return fail(500, { taskForm: { error: `Failed to update task: ${error.message}` } });
         }
     },
-    
-    updateTaskDueDate: async ({ request, locals }) => {
-        const userId = locals.userId;
-        if (!userId) return fail(401, { updateDueDateForm: { error: 'User not authenticated.' } });
-        
-        const formData = await request.formData();
-        const taskId = formData.get('taskId')?.toString();
-        const newDueDateISO = formData.get('newDueDateISO')?.toString(); 
 
-        if (!taskId) return fail(400, { updateDueDateForm: { error: 'Task ID is required.' }});
-        if (newDueDateISO === undefined) return fail(400, { updateDueDateForm: { error: 'New due date is required.' }});
+    // The toggleComplete action is now redundant as its functionality is merged into updateTask.
+    // It can be removed or kept for other specific uses if needed elsewhere.
+    // For this task, we will remove it to avoid confusion and consolidate logic.
+    // toggleComplete: async ({ request, locals }) => {
+    //     const userId = locals.userId;
+    //     if (!userId) return fail(401, { toggleCompleteForm: { error: 'User not authenticated.' } });
+    //     const formData = await request.formData();
+    //     const taskId = formData.get('taskId')?.toString();
+    //     const currentIsCompleted = formData.get('isCompleted')?.toString() === 'true';
+    //     if (!taskId) return fail(400, { toggleCompleteForm: { error: 'Task ID is required.' } });
 
-        const updatePayload: Partial<Pick<FetchedTaskData, 'dueDate' | 'dueTime'>> & { lastModified: FieldValue } = {
-            lastModified: FieldValue.serverTimestamp()
-        };
+    //     try {
+    //         const taskRef = tasksCollection.doc(taskId);
+    //         const taskDoc = await taskRef.get();
+    //         const taskDataFromDb = taskDoc.data(); // Already FetchedTaskData
+    //         if (!taskDataFromDb) return fail(404, { toggleCompleteForm: { error: 'Task not found.' } });
+    //         if (taskDataFromDb.userId !== userId) return fail(403, { toggleCompleteForm: { error: 'Permission denied.' } });
 
-        if (newDueDateISO === '' || newDueDateISO === null) {
-            updatePayload.dueDate = null;
-            updatePayload.dueTime = null; 
-        } else if (newDueDateISO.match(/^\d{4}-\d{2}-\d{2}$/)) {
-            updatePayload.dueDate = newDueDateISO;
-            // Note: If newDueDateISO is set, existing dueTime persists unless explicitly cleared.
-            // If you want to clear dueTime when only date is changed, add logic here or expect client to send it.
-        } else {
-            return fail(400, { updateDueDateForm: { error: 'Invalid new due date format.' }});
-        }
-        
-        try {
-            const taskRef = tasksCollection.doc(taskId);
-            const taskDoc = await taskRef.get();
-            if (!taskDoc.exists) return fail(404, { updateDueDateForm: { error: 'Task not found.' }});
-            if (taskDoc.data()?.userId !== userId) return fail(403, { updateDueDateForm: { error: 'Permission denied.' }});
-            
-            await taskRef.update(updatePayload);
-            return { updateDueDateForm: { success: true, message: 'Task due date updated successfully.' }};
-        } catch (error: any) {
-            console.error(`[Action updateTaskDueDate /kanban] ERROR for task ${taskId} to ${newDueDateISO}:`, error);
-            return fail(500, { updateDueDateForm: { error: `Failed to update task due date: ${error.message}` }});
-        }
-    },
-
-    toggleComplete: async ({ request, locals }) => {
-        const userId = locals.userId;
-        if (!userId) return fail(401, { toggleCompleteForm: { error: 'User not authenticated.' } });
-        const formData = await request.formData();
-        const taskId = formData.get('taskId')?.toString();
-        const currentIsCompleted = formData.get('isCompleted')?.toString() === 'true';
-        if (!taskId) return fail(400, { toggleCompleteForm: { error: 'Task ID is required.' } });
-
-        try {
-            const taskRef = tasksCollection.doc(taskId);
-            const taskDoc = await taskRef.get();
-            const taskDataFromDb = taskDoc.data(); // Already FetchedTaskData
-            if (!taskDataFromDb) return fail(404, { toggleCompleteForm: { error: 'Task not found.' } });
-            if (taskDataFromDb.userId !== userId) return fail(403, { toggleCompleteForm: { error: 'Permission denied.' } });
-
-            const newCompletedState = !currentIsCompleted;
-            // Explicit type for payload ensuring FieldValue usage
-            const updatePayload: { isCompleted: boolean; lastModified: FieldValue; completedAt: FieldValue | null } = {
-                isCompleted: newCompletedState,
-                lastModified: FieldValue.serverTimestamp(),
-                completedAt: newCompletedState ? FieldValue.serverTimestamp() : null
-            };
-            await taskRef.update(updatePayload);
-            return { toggleCompleteForm: { successMessage: `Task ${newCompletedState ? 'marked complete' : 'marked incomplete'}.`, taskId, newCompletedState } };
-        } catch (error: any) {
-            console.error(`[Action toggleComplete /kanban] ERROR for task ${taskId}:`, error);
-            return fail(500, { toggleCompleteForm: { error: `Failed to update completion: ${error.message}` } });
-        }
-    },
+    //         const newCompletedState = !currentIsCompleted;
+    //         // Explicit type for payload ensuring FieldValue usage
+    //         const updatePayload: { isCompleted: boolean; lastModified: FieldValue; completedAt: FieldValue | null } = {
+    //             isCompleted: newCompletedState,
+    //             lastModified: FieldValue.serverTimestamp(),
+    //             completedAt: newCompletedState ? FieldValue.serverTimestamp() : null
+    //         };
+    //         await taskRef.update(updatePayload);
+    //         return { toggleCompleteForm: { successMessage: `Task ${newCompletedState ? 'marked complete' : 'marked incomplete'}.`, taskId, newCompletedState } };
+    //     } catch (error: any) {
+    //         console.error(`[Action toggleComplete /kanban] ERROR for task ${taskId}:`, error);
+    //         return fail(500, { toggleCompleteForm: { error: `Failed to update completion: ${error.message}` } });
+    //     }
+    // },
 
     deleteTask: async ({ request, locals }) => {
         const userId = locals.userId;
