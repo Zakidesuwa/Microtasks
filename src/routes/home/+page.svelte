@@ -10,6 +10,7 @@
   import { browser } from '$app/environment';
 
   let isSidebarOpen = false;
+  let currentDateTime = "";
   let showNoteForm = false;
   let editingNoteId: string | null = null;
   let noteTitle = "";
@@ -243,6 +244,20 @@
     return "GOOD EVENING";
   }
   
+  function updateDateTime() {
+    const now = new Date();
+    const options: Intl.DateTimeFormatOptions = {
+      weekday: 'long',
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: 'numeric',
+      hour12: true
+    };
+    currentDateTime = now.toLocaleDateString('en-US', options);
+  }
+
   function handleLogout() {
     if (browser) {
         localStorage.removeItem('microtask_username');
@@ -586,10 +601,13 @@
     }
 
     updateChatWindowStyle();
+    updateDateTime(); // Initial call
     const greetingIntervalId = setInterval(() => { greeting = getGreeting(); }, 60000);
+    const dateTimeIntervalId = setInterval(updateDateTime, 60000); // Update every minute
 
     return () => {
       clearInterval(greetingIntervalId);
+      clearInterval(dateTimeIntervalId); // Clear interval on unmount
       document.removeEventListener('click', handleGlobalClick);
       document.removeEventListener('keydown', handleEscKey);
       if (chatHeaderElement) chatHeaderElement.removeEventListener('mousedown', onDragMouseDown);
@@ -690,6 +708,11 @@
       <span class={`${isDarkMode ? 'text-zinc-100' : 'text-gray-800'}`}>Microtask</span>
     </a>
   </div>
+      <div class="flex items-center gap-4 mr-4 right text-gray-600 dark:text-zinc-300 text-sm font-medium">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-5 h-5" aria-hidden="true">
+          <path fill-rule="evenodd" d="M6.75 2.25A.75.75 0 017.5 3v1.5h9V3A.75.75 0 0118 3v1.5h.75a3 3 0 013 3v11.25a3 3 0 01-3 3H5.25a3 3 0 01-3-3V7.5a3 3 0 013-3H6V3a.75.75 0 01.75-.75zM5.25 6.75c-.621 0-1.125.504-1.125 1.125V18a1.125 1.125 0 001.125 1.125h13.5A1.125 1.125 0 0019.875 18V7.875c0-.621-.504-1.125-1.125-1.125H5.25z" clip-rule="evenodd" /><path d="M10.5 9.75a.75.75 0 00-1.5 0v.01c0 .414.336.75.75.75H10.5v-.01a.75.75 0 000-1.5zM10.5 12.75a.75.75 0 00-1.5 0v.01c0 .414.336.75.75.75H10.5v-.01a.75.75 0 000-1.5zM10.5 15.75a.75.75 0 00-1.5 0v.01c0 .414.336.75.75.75H10.5v-.01a.75.75 0 000-1.5zM13.5 9.75a.75.75 0 00-1.5 0v.01c0 .414.336.75.75.75H13.5v-.01a.75.75 0 000-1.5zM13.5 12.75a.75.75 0 00-1.5 0v.01c0 .414.336.75.75.75H13.5v-.01a.75.75 0 000-1.5zM13.5 15.75a.75.75 0 00-1.5 0v.01c0 .414.336.75.75.75H13.5v-.01a.75.75 0 000-1.5zM16.5 9.75a.75.75 0 00-1.5 0v.01c0 .414.336.75.75.75H16.5v-.01a.75.75 0 000-1.5zM16.5 12.75a.75.75 0 00-1.5 0v.01c0 .414.336.75.75.75H16.5v-.01a.75.75 0 000-1.5zM16.5 15.75a.75.75 0 00-1.5 0v.01c0 .414.336.75.75.75H16.5v-.01a.75.75 0 000-1.5z"/></svg>
+        <span>{currentDateTime}</span>
+      </div>
       <div class="header-icons">
         <div class="relative">
           <button id="bellIcon" aria-label="Notifications">

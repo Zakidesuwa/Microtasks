@@ -785,8 +785,6 @@
             return;
         }
 
-        isLoadingOperation = true; // Start loading
-
         const { task: taskToMove, fromColumnId: originalVisualColumnId } = draggedCardItem;
         const taskInFlatList = allTasksFlatList.find(t => t.id === taskToMove.id);
 
@@ -802,6 +800,7 @@
         resetDraggedCardVisuals(); // Reset visuals BEFORE any async confirm
 
         if (dropTargetTaskId === taskInFlatList.id && targetStatusColumnId === originalVisualColumnId && !currentCardDragOverInfo?.position) {
+            isLoadingOperation = false; // No actual change, so stop loading
             cleanupCardDragState();
             return;
         }
@@ -815,6 +814,7 @@
                 newIsCompletedStateForOptimisticUpdate = true;
                 performOptimisticUpdateAndServerCall = true;
             } else {
+                isLoadingOperation = false; // User declined, stop loading
                 cleanupCardDragState();
                 return;
             }
@@ -824,6 +824,7 @@
                 newIsCompletedStateForOptimisticUpdate = false;
                 performOptimisticUpdateAndServerCall = true;
             } else {
+                isLoadingOperation = false; // User declined, stop loading
                 cleanupCardDragState();
                 return;
             }
@@ -880,6 +881,7 @@
 
         // --- Server Action (if needed and confirmed) ---
         if (performOptimisticUpdateAndServerCall) { // This flag is true only if user confirmed
+            isLoadingOperation = true; // Start loading only AFTER confirmation
             const formDataForServer = new FormData();
             formDataForServer.append('taskId', taskInFlatList.id);
             formDataForServer.append('isCompleted', String(newIsCompletedStateForOptimisticUpdate)); 
